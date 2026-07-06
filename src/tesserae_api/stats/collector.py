@@ -4,7 +4,8 @@ One row is written per served request. The only fields stored are:
   ts               request timestamp (UTC)
   install_uuid     client-generated UUID (NULL if the client omitted it)
   country, region  coarse geo, derived from the caller IP then the IP is discarded
-  channel          requested channel
+  channel          requested channel (version endpoint)
+  kind             device kind (firmware endpoint)
   current_version  the caller's reported current version
 
 No IP addresses and no User-Agent strings are ever written.
@@ -26,6 +27,8 @@ from sqlalchemy import (
     Table,
     create_engine,
     insert,
+    inspect,
+    text,
 )
 from sqlalchemy.engine import Engine
 
@@ -39,10 +42,14 @@ hits = Table(
     Column("country", String),
     Column("region", String),
     Column("channel", String),
+    Column("kind", String),
     Column("current_version", String),
     Index("idx_hits_install", "install_uuid"),
     Index("idx_hits_ts", "ts"),
 )
+
+# Columns added after the initial schema shipped, applied to pre-existing tables.
+_ADDED_COLUMNS = {"kind": "VARCHAR"}
 
 # One engine per URL, reused across requests (SQLAlchemy pools connections).
 _engines: dict[str, Engine] = {}
@@ -57,8 +64,18 @@ def get_engine(url: str) -> Engine:
 
 
 def init_db(url: str) -> None:
-    """Create the hits table and indexes if they do not exist."""
-    metadata.create_all(get_engine(url))
+    """Create the hits table and indexes, and add any newer columns in place."""
+    engine = get_engine(url)
+    metadata.create_all(engine)
+    _apply_added_columns(engine)
+
+
+def _apply_added_columns(engine: Engine) -> None:
+    existing = {col["name"] for col in inspect(engine).get_columns("hits")}
+    for name, sql_type in _ADDED_COLUMNS.items():
+        if name not in existing:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE hits ADD COLUMN {name} {sql_type}"))
 
 
 def record_hit(
@@ -67,7 +84,8 @@ def record_hit(
     install_uuid: str | None,
     country: str | None,
     region: str | None,
-    channel: str | None,
+    channel: str | None = None,
+    kind: str | None = None,
     current_version: str | None,
     ts: datetime | None = None,
 ) -> None:
@@ -82,6 +100,7 @@ def record_hit(
                 country=country,
                 region=region,
                 channel=channel,
+                kind=kind,
                 current_version=current_version,
             )
         )

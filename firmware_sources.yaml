@@ -1,0 +1,41 @@
+# Maps device kind slugs to their firmware release source.
+#
+# Adding a new device kind is a config edit plus a redeploy, no code change.
+# type: only github_releases is implemented. channel: only stable is implemented
+# (edge/main are placeholders in the schema, not yet routed).
+
+esp32_client:
+  type: github_releases
+  owner: dmellok
+  repo: tesserae-device-firmware
+  channel: stable
+
+esp32_bw_client:
+  type: github_releases
+  owner: dmellok
+  repo: tesserae-device-firmware
+  channel: stable
+
+pi_bin_client:
+  type: github_releases
+  owner: dmellok
+  repo: tesserae-device-pi-bin
+  channel: stable
+
+pi_png_client:
+  type: github_releases
+  owner: dmellok
+  repo: tesserae-device-pi-png
+  channel: stable
+
+trmnl_client:
+  type: github_releases
+  owner: usetrmnl
+  repo: trmnl-firmware
+  channel: stable
+
+picpak_client:
+  type: github_releases
+  owner: varanu5
+  repo: picpak-tesserae-client
+  channel: stable

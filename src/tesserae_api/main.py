@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from tesserae_api.cache import github_releases
+from tesserae_api.cache import firmware, github_releases
 from tesserae_api.config import get_settings
+from tesserae_api.routes import firmware as firmware_routes
 from tesserae_api.routes import version
 from tesserae_api.stats import collector, geo
 
@@ -27,6 +28,11 @@ async def lifespan(app: FastAPI):
             github_releases.poll_and_cache(settings)
         except Exception as exc:  # noqa: BLE001 - best effort, never fatal at boot
             log.warning("initial GitHub poll failed: %s", exc)
+    if firmware.load_cache(settings.firmware_cache_path) is None:
+        try:
+            firmware.poll_and_cache(settings)
+        except Exception as exc:  # noqa: BLE001 - best effort, never fatal at boot
+            log.warning("initial firmware poll failed: %s", exc)
     yield
     geo.close()
     collector.dispose()
@@ -49,6 +55,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(version.router)
+    app.include_router(firmware_routes.router)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:

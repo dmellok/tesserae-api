@@ -24,7 +24,7 @@ def test_init_creates_table(settings):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(hits)")}
     finally:
         conn.close()
-    assert cols == {"ts", "install_uuid", "country", "region", "channel", "current_version"}
+    assert cols == {"ts", "install_uuid", "country", "region", "channel", "kind", "current_version"}
 
 
 def test_record_hit_persists(settings):
@@ -44,6 +44,22 @@ def test_record_hit_persists(settings):
     assert rows[0]["region"] == "New South Wales"
     assert rows[0]["channel"] == "stable"
     assert rows[0]["current_version"] == "0.69.18"
+
+
+def test_record_hit_with_kind(settings):
+    collector.init_db(settings.resolved_database_url)
+    collector.record_hit(
+        settings.resolved_database_url,
+        install_uuid="3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        country="AU",
+        region="Victoria",
+        kind="picpak_client",
+        current_version="0.1.0-dev",
+    )
+    rows = _rows(settings.stats_db_path)
+    assert rows[0]["kind"] == "picpak_client"
+    assert rows[0]["channel"] is None
+    assert rows[0]["current_version"] == "0.1.0-dev"
 
 
 def test_record_hit_null_uuid(settings):

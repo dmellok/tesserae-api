@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # to a postgresql+psycopg:// URL in production (see docker-compose.yml).
     database_url: str | None = None
 
+    # Firmware source config (baked into the image at /app/firmware_sources.yaml).
+    firmware_sources_path: Path = Field(default=Path("firmware_sources.yaml"))
+
     # GeoLite2 database. Baked into the image outside the /data volume so a weekly
     # image rebuild refreshes it without touching persistent state. Falls back to
     # data_dir/geoip.mmdb for local development.
@@ -43,6 +46,10 @@ class Settings(BaseSettings):
     @property
     def version_cache_path(self) -> Path:
         return self.data_dir / "version_cache.json"
+
+    @property
+    def firmware_cache_path(self) -> Path:
+        return self.data_dir / "firmware_cache.json"
 
     @property
     def stats_db_path(self) -> Path:

@@ -91,6 +91,23 @@ def summarise(url: str, now: datetime | None = None) -> None:
         if not rows:
             print("  (none)")
 
+    _print_header("Firmware checks by kind (unique installs)")
+    fw_key = hits.c.kind
+    fw_cnt = func.count(distinct(hits.c.install_uuid)).label("n")
+    fw_stmt = (
+        select(fw_key, fw_cnt)
+        .where(_HAS_UUID)
+        .where(hits.c.kind.is_not(None))
+        .group_by(fw_key)
+        .order_by(fw_cnt.desc())
+    )
+    with engine.connect() as conn:
+        fw_rows = [(r[0], r[1]) for r in conn.execute(fw_stmt)]
+    for name, n in fw_rows:
+        print(f"  {str(name):<24} {n}")
+    if not fw_rows:
+        print("  (none)")
+
     _print_header("Retention (unique installs seen within window)")
     for days in (7, 30, 90):
         print(f"  last {days:>3} days   {_seen_in_last(engine, days, now)}")

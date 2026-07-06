@@ -35,9 +35,9 @@ License: AGPL-3.0-or-later.
 ```
 
 The application never calls GitHub on the request path. A systemd timer polls GitHub every 15
-minutes and writes `version_cache.json`; requests are served entirely from that cache. If GitHub is
-unreachable at poll time the previous cache file is left untouched, so the API keeps serving the
-last known good value.
+minutes and writes `version_cache.json` and `firmware_cache.json`; requests are served entirely
+from those caches. If GitHub is unreachable at poll time the previous cache is left untouched, so
+the API keeps serving the last known good value.
 
 ### Layout
 
@@ -46,11 +46,14 @@ src/tesserae_api/
   main.py                  FastAPI app factory
   config.py                settings (paths, repo slug, GitHub token)
   routes/version.py        GET /version/latest
-  cache/github_releases.py GitHub polling, cache read/write, channel resolution
+  routes/firmware.py       GET /firmware/{kind}/latest
+  cache/github_releases.py version polling, cache read/write, channel resolution
+  cache/firmware.py        per-kind firmware polling, cache, resolution
   stats/collector.py       aggregate writes (SQLAlchemy: SQLite dev, Postgres prod)
   stats/geo.py             MaxMind GeoLite2 lookup
+firmware_sources.yaml      device kind -> GitHub release source map
 scripts/
-  poll_github.py           run by the systemd timer
+  poll_github.py           run by the systemd timer (version + firmware)
   dump_stats.py            maintainer's stats reader
 ```
 
@@ -106,6 +109,45 @@ When `current` is omitted (or unparseable), `is_current` and `versions_behind` /
 are `null`. If the cache has not been populated yet the endpoint returns `503` with
 `Cache-Control: no-store` and a `Retry-After` header.
 
+### `GET /firmware/{kind}/latest`
+
+Per-device-kind firmware update check. `kind` is a device slug (`esp32_client`, `pi_bin_client`,
+`picpak_client`, etc.) defined in `firmware_sources.yaml`. Each kind maps to a GitHub repository
+whose latest stable release is polled and cached, mirroring `/version/latest`.
+
+Query parameters:
+
+| Param     | Required | Notes                                                                 |
+| --------- | -------- | --------------------------------------------------------------------- |
+| `current` | no       | Caller's running firmware version. Adds `is_current` and `versions_behind`. |
+| `install` | no       | Client-generated UUID v4, stored opaquely against the stats record.   |
+
+Response headers: `Cache-Control: public, max-age=300` and `Access-Control-Allow-Origin: *`.
+
+```json
+{
+  "kind": "picpak_client",
+  "current": "0.1.0-dev",
+  "latest": {
+    "version": "0.1.1",
+    "released_at": "2026-07-01T09:00:00Z",
+    "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
+    "notes_headline": "Fix vflip regression",
+    "assets": [
+      { "name": "picpak-firmware-v0.1.1.bin", "download_url": "https://github.com/..." }
+    ]
+  },
+  "is_current": false,
+  "versions_behind": 1
+}
+```
+
+`assets` is empty when the release attached no binaries; the API links to GitHub's asset URLs and
+does not proxy the binaries. Unknown `kind` returns `404`. A configured kind with no cached release
+yet (for example a source repo that has not cut a release) returns `503`. Adding a new device kind
+is a `firmware_sources.yaml` edit plus a redeploy, no code change. Only the `stable` channel is
+implemented; `edge`/`main` are placeholders in the config schema.
+
 Interactive OpenAPI docs are served at `/docs`.
 
 ## Aggregate stats collected
@@ -120,10 +162,14 @@ CREATE TABLE hits (
   install_uuid TEXT,          -- client-generated UUID, NULL if the client omitted it
   country TEXT,               -- coarse geo from MaxMind, IP discarded after lookup
   region TEXT,
-  channel TEXT,
+  channel TEXT,               -- version endpoint: requested channel
+  kind TEXT,                  -- firmware endpoint: device kind
   current_version TEXT
 );
 ```
+
+Both endpoints record hits. `/version/latest` sets `channel`; `/firmware/{kind}/latest` sets
+`kind`. Both honour the same optional `install` UUID contract.
 
 What is deliberately **not** collected, ever:
 

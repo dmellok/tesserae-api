@@ -1,4 +1,4 @@
-"""Shared fixtures: an isolated data dir and a seeded version cache."""
+"""Shared fixtures: an isolated data dir and seeded version + firmware caches."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tesserae_api.config import Settings, get_settings
 
@@ -107,13 +108,64 @@ SEED_CACHE = {
 }
 
 
+# Firmware source config, shaped as firmware_sources.yaml.
+SEED_FIRMWARE_SOURCES = {
+    "picpak_client": {
+        "type": "github_releases",
+        "owner": "varanu5",
+        "repo": "picpak-tesserae-client",
+        "channel": "stable",
+    },
+    "esp32_client": {
+        "type": "github_releases",
+        "owner": "dmellok",
+        "repo": "tesserae-device-firmware",
+        "channel": "stable",
+    },
+}
+
+# Firmware cache, shaped as firmware.poll_and_cache() produces it.
+SEED_FIRMWARE_CACHE = {
+    "picpak_client": {
+        "latest": {
+            "version": "0.1.1",
+            "prerelease": False,
+            "released_at": "2026-07-01T09:00:00Z",
+            "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
+            "notes_headline": "Fix vflip regression",
+            "assets": [
+                {
+                    "name": "picpak-firmware-v0.1.1.bin",
+                    "download_url": "https://github.com/varanu5/picpak-tesserae-client/releases/download/v0.1.1/picpak-firmware-v0.1.1.bin",
+                }
+            ],
+        },
+        "versions": ["0.1.1"],
+    },
+    # No attached assets: an empty assets array is valid.
+    "esp32_client": {
+        "latest": {
+            "version": "1.2.0",
+            "prerelease": False,
+            "released_at": "2026-06-20T08:00:00Z",
+            "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.2.0",
+            "notes_headline": "Battery reporting",
+            "assets": [],
+        },
+        "versions": ["1.2.0", "1.1.0"],
+    },
+}
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """A Settings instance pointing every path at an isolated tmp dir."""
     from tesserae_api.stats import collector
 
     get_settings.cache_clear()
-    s = Settings(data_dir=tmp_path)
+    sources_path = tmp_path / "firmware_sources.yaml"
+    sources_path.write_text(yaml.safe_dump(SEED_FIRMWARE_SOURCES), encoding="utf-8")
+    s = Settings(data_dir=tmp_path, firmware_sources_path=sources_path)
     yield s
     collector.dispose()
     get_settings.cache_clear()
@@ -123,6 +175,7 @@ def settings(tmp_path: Path) -> Settings:
 def seeded_settings(settings: Settings) -> Settings:
     settings.version_cache_path.parent.mkdir(parents=True, exist_ok=True)
     settings.version_cache_path.write_text(json.dumps(SEED_CACHE), encoding="utf-8")
+    settings.firmware_cache_path.write_text(json.dumps(SEED_FIRMWARE_CACHE), encoding="utf-8")
     return settings
 
 
@@ -137,6 +190,7 @@ def client(seeded_settings: Settings, monkeypatch):
     monkeypatch.setattr(config_mod, "get_settings", lambda: seeded_settings)
     # Route and app modules import get_settings by name, patch those references too.
     monkeypatch.setattr("tesserae_api.routes.version.get_settings", lambda: seeded_settings)
+    monkeypatch.setattr("tesserae_api.routes.firmware.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.main.get_settings", lambda: seeded_settings)
 
     app = create_app()
