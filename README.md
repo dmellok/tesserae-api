@@ -202,3 +202,10 @@ Secrets live in the repo's Settings -> Secrets and variables -> Actions:
 
 For the GHCR login the deploy user uses on the VPS, generate a new GitHub PAT with `read:packages`
 and re-run `docker login ghcr.io` as shown in BOOTSTRAP.md.
+
+### Image visibility
+
+The repository is private, so the published `ghcr.io/dmellok/tesserae-api` package defaults to
+private and the VPS deploy user must be logged in to GHCR to pull it (BOOTSTRAP.md step 6). To drop
+that requirement, make only the package public: Profile -> Packages -> tesserae-api -> Package
+settings -> Change visibility -> Public. The repo can stay private either way.
