@@ -45,9 +45,22 @@ sudo systemctl restart caddy
 sudo mkdir -p /opt/tesserae-api /var/lib/tesserae-api /var/log/caddy
 sudo chown -R deploy:deploy /opt/tesserae-api
 # The API container runs as uid 999 (the "app" user baked into the image). The
-# /data bind mount must be owned by that uid or the app cannot create stats.db.
+# /data bind mount holds version_cache.json and must be owned by that uid.
 sudo chown -R 999:999 /var/lib/tesserae-api
 sudo chown -R caddy:caddy /var/log/caddy
+```
+
+Stats are stored in PostgreSQL (a `postgres` service in docker-compose, on a
+Docker-managed named volume), not in the /data bind mount.
+
+## 4b. Create the database password env file
+
+docker-compose reads `POSTGRES_PASSWORD` from `/opt/tesserae-api/.env`. Generate a
+strong password and write it once (never commit this file):
+
+```bash
+sudo -u deploy bash -c 'umask 077 && printf "POSTGRES_PASSWORD=%s\n" "$(openssl rand -base64 32)" > /opt/tesserae-api/.env'
+sudo chmod 600 /opt/tesserae-api/.env
 ```
 
 ## 5. Install the compose file and Caddyfile
@@ -102,6 +115,9 @@ ssh deploy@<vps> 'sudo mv /tmp/tesserae-api-poll.* /etc/systemd/system/ && \
 
 ## 8. Start the service
 
+Compose starts `postgres` first, waits for it to become healthy, then starts the
+API (which creates the `hits` table on startup):
+
 ```bash
 cd /opt/tesserae-api
 sudo -u deploy docker compose up -d
@@ -115,7 +131,30 @@ sudo -u deploy docker exec tesserae-api python -m scripts.poll_github
 curl -fsS https://api.tesserae.ink/version/latest
 # Local check bypassing Caddy:
 curl -fsS http://127.0.0.1:8000/healthz
+# Stats reader (talks to Postgres via the app config):
+sudo -u deploy docker exec tesserae-api python -m scripts.dump_stats
 ```
+
+## 10. Remote database access (SSH tunnel)
+
+Postgres listens only on the VPS loopback (`127.0.0.1:5432`); it is never exposed
+to the internet and ufw stays at 22/80/443. To query it from your machine with
+psql or an ODBC/BI tool, forward the port over your existing SSH login:
+
+```bash
+# On your workstation, leave this running:
+ssh -N -L 5432:127.0.0.1:5432 kayden@api.tesserae.ink
+```
+
+Then connect a client to `localhost:5432`:
+
+```
+host=localhost  port=5432  dbname=tesserae  user=tesserae  password=<from /opt/tesserae-api/.env>
+```
+
+For ODBC, install the PostgreSQL driver (psqlODBC) and point the DSN at
+`localhost:5432`. Everything rides the encrypted SSH channel; no new firewall
+rules are needed.
 
 ## GitHub secrets to add first
 

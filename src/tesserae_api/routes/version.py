@@ -77,7 +77,7 @@ def version_latest(
 
     try:
         collector.record_hit(
-            settings.stats_db_path,
+            settings.resolved_database_url,
             install_uuid=_normalise_install(install),
             country=country,
             region=region,

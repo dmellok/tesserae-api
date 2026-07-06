@@ -1,19 +1,53 @@
 # Deployed to /opt/tesserae-api/docker-compose.yml on the VPS.
 # `docker compose pull && docker compose up -d` runs the published image.
+#
+# Requires /opt/tesserae-api/.env with POSTGRES_PASSWORD set (see BOOTSTRAP.md).
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tesserae-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tesserae
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in /opt/tesserae-api/.env}
+      POSTGRES_DB: tesserae
+    volumes:
+      # Named volume: Docker owns the permissions, avoiding host-uid mismatches.
+      - pgdata:/var/lib/postgresql/data
+    # Publish on host loopback only. Remote access is via SSH tunnel, never a
+    # public port. Caddy and ufw never touch 5432.
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tesserae -d tesserae"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   api:
     image: ghcr.io/dmellok/tesserae-api:latest
     container_name: tesserae-api
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Bind to host loopback only; Caddy terminates TLS and reverse-proxies to it.
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      # Persist stats.db and version_cache.json across container replacement.
+      # Persist version_cache.json across container replacement (stats live in Postgres).
       - /var/lib/tesserae-api:/data
     environment:
       TESSERAE_DATA_DIR: /data
       TESSERAE_GEOIP_PATH: /app/geoip/geoip.mmdb
+      TESSERAE_DATABASE_URL: postgresql+psycopg://tesserae:${POSTGRES_PASSWORD}@postgres:5432/tesserae
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s
@@ -21,9 +55,12 @@ services:
       retries: 3
       start_period: 10s
     # 1 vCPU / 1GB VPS: keep memory bounded.
-    mem_limit: 512m
+    mem_limit: 384m
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  pgdata:

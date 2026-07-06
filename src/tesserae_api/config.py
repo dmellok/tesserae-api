@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # On-disk runtime state.
     data_dir: Path = Field(default=Path("data"))
 
+    # Stats database. Defaults to a local SQLite file for development and CI; set
+    # to a postgresql+psycopg:// URL in production (see docker-compose.yml).
+    database_url: str | None = None
+
     # GeoLite2 database. Baked into the image outside the /data volume so a weekly
     # image rebuild refreshes it without touching persistent state. Falls back to
     # data_dir/geoip.mmdb for local development.
@@ -43,6 +47,13 @@ class Settings(BaseSettings):
     @property
     def stats_db_path(self) -> Path:
         return self.data_dir / "stats.db"
+
+    @property
+    def resolved_database_url(self) -> str:
+        """Configured DATABASE_URL, or a SQLite file under data_dir by default."""
+        if self.database_url:
+            return self.database_url
+        return f"sqlite:///{self.stats_db_path}"
 
     @property
     def geoip_db_path(self) -> Path:

@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """Human-readable summary of the aggregate stats database.
 
+Works against whichever backend the app uses (SQLite locally, PostgreSQL in
+production) via a SQLAlchemy URL.
+
 Usage:
     python -m scripts.dump_stats
     docker exec tesserae-api python -m scripts.dump_stats
-    python -m scripts.dump_stats --db /var/lib/tesserae-api/stats.db
+    python -m scripts.dump_stats --database-url postgresql+psycopg://user:pw@host/db
 """
 
 from __future__ import annotations
 
 import argparse
-import sqlite3
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+
+from sqlalchemy import distinct, func, select
+from sqlalchemy.engine import Engine
 
 from tesserae_api.config import get_settings
+from tesserae_api.stats.collector import get_engine, hits, init_db
 
-
-def _connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
+_HAS_UUID = hits.c.install_uuid.is_not(None)
 
 
 def _print_header(title: str) -> None:
@@ -28,99 +29,88 @@ def _print_header(title: str) -> None:
     print("-" * len(title))
 
 
-def _seen_in_last(conn: sqlite3.Connection, days: int, now: datetime) -> int:
-    since = (now - timedelta(days=days)).isoformat()
-    row = conn.execute(
-        "SELECT COUNT(DISTINCT install_uuid) AS n FROM hits "
-        "WHERE install_uuid IS NOT NULL AND ts >= ?",
-        (since,),
-    ).fetchone()
-    return row["n"] or 0
+def _scalar(engine: Engine, stmt) -> int:
+    with engine.connect() as conn:
+        return conn.execute(stmt).scalar_one()
 
 
-def _new_installs_last(conn: sqlite3.Connection, days: int, now: datetime) -> int:
+def _seen_in_last(engine: Engine, days: int, now: datetime) -> int:
+    since = now - timedelta(days=days)
+    stmt = (
+        select(func.count(distinct(hits.c.install_uuid))).where(_HAS_UUID).where(hits.c.ts >= since)
+    )
+    return _scalar(engine, stmt)
+
+
+def _new_installs_last(engine: Engine, days: int, now: datetime) -> int:
     """Installs whose first-ever sighting falls within the window."""
-    since = (now - timedelta(days=days)).isoformat()
-    row = conn.execute(
-        "SELECT COUNT(*) AS n FROM ("
-        "  SELECT install_uuid, MIN(ts) AS first_seen FROM hits "
-        "  WHERE install_uuid IS NOT NULL GROUP BY install_uuid"
-        ") WHERE first_seen >= ?",
-        (since,),
-    ).fetchone()
-    return row["n"] or 0
+    since = now - timedelta(days=days)
+    first_seen = (
+        select(func.min(hits.c.ts).label("first_seen"))
+        .where(_HAS_UUID)
+        .group_by(hits.c.install_uuid)
+        .subquery()
+    )
+    stmt = select(func.count()).select_from(first_seen).where(first_seen.c.first_seen >= since)
+    return _scalar(engine, stmt)
 
 
-def summarise(db_path: Path, now: datetime | None = None) -> None:
+def _grouped(engine: Engine, column, label_default: str) -> list[tuple[str, int]]:
+    key = func.coalesce(column, label_default)
+    cnt = func.count(distinct(hits.c.install_uuid)).label("n")
+    stmt = select(key, cnt).where(_HAS_UUID).group_by(key).order_by(cnt.desc())
+    with engine.connect() as conn:
+        return [(row[0], row[1]) for row in conn.execute(stmt)]
+
+
+def summarise(url: str, now: datetime | None = None) -> None:
     now = now or datetime.now(UTC)
-    conn = _connect(db_path)
-    try:
-        total_hits = conn.execute("SELECT COUNT(*) AS n FROM hits").fetchone()["n"]
-        unique = conn.execute(
-            "SELECT COUNT(DISTINCT install_uuid) AS n FROM hits WHERE install_uuid IS NOT NULL"
-        ).fetchone()["n"]
-        anon = conn.execute("SELECT COUNT(*) AS n FROM hits WHERE install_uuid IS NULL").fetchone()[
-            "n"
-        ]
+    engine = get_engine(url)
 
-        print(f"Tesserae stats  ({db_path})")
-        print(f"Generated {now.isoformat()}")
-        _print_header("Totals")
-        print(f"Total requests           {total_hits}")
-        print(f"Unique installs          {unique}")
-        print(f"Requests without UUID    {anon}")
+    total = _scalar(engine, select(func.count()).select_from(hits))
+    unique = _scalar(engine, select(func.count(distinct(hits.c.install_uuid))).where(_HAS_UUID))
+    anon = _scalar(engine, select(func.count()).where(hits.c.install_uuid.is_(None)))
 
-        _print_header("Unique installs by country")
-        rows = conn.execute(
-            "SELECT COALESCE(country, '??') AS country, COUNT(DISTINCT install_uuid) AS n "
-            "FROM hits WHERE install_uuid IS NOT NULL GROUP BY country ORDER BY n DESC"
-        ).fetchall()
-        for r in rows:
-            print(f"  {r['country']:<6} {r['n']}")
+    print(f"Tesserae stats  ({engine.url.render_as_string(hide_password=True)})")
+    print(f"Generated {now.isoformat()}")
+    _print_header("Totals")
+    print(f"Total requests           {total}")
+    print(f"Unique installs          {unique}")
+    print(f"Requests without UUID    {anon}")
+
+    for title, column in (
+        ("Unique installs by country", hits.c.country),
+        ("Version distribution (unique installs)", hits.c.current_version),
+        ("Channel distribution (unique installs)", hits.c.channel),
+    ):
+        _print_header(title)
+        default = "??" if column is hits.c.country else "(unknown)"
+        rows = _grouped(engine, column, default)
+        for name, n in rows:
+            print(f"  {str(name):<20} {n}")
         if not rows:
             print("  (none)")
 
-        _print_header("Version distribution (unique installs)")
-        rows = conn.execute(
-            "SELECT COALESCE(current_version, '(unknown)') AS v, COUNT(DISTINCT install_uuid) AS n "
-            "FROM hits WHERE install_uuid IS NOT NULL GROUP BY v ORDER BY n DESC"
-        ).fetchall()
-        for r in rows:
-            print(f"  {r['v']:<20} {r['n']}")
-        if not rows:
-            print("  (none)")
+    _print_header("Retention (unique installs seen within window)")
+    for days in (7, 30, 90):
+        print(f"  last {days:>3} days   {_seen_in_last(engine, days, now)}")
 
-        _print_header("Channel distribution (unique installs)")
-        rows = conn.execute(
-            "SELECT COALESCE(channel, '(unknown)') AS c, COUNT(DISTINCT install_uuid) AS n "
-            "FROM hits WHERE install_uuid IS NOT NULL GROUP BY c ORDER BY n DESC"
-        ).fetchall()
-        for r in rows:
-            print(f"  {r['c']:<10} {r['n']}")
-        if not rows:
-            print("  (none)")
-
-        _print_header("Retention (unique installs seen within window)")
-        for days in (7, 30, 90):
-            print(f"  last {days:>3} days   {_seen_in_last(conn, days, now)}")
-
-        _print_header("New installs (first seen within window)")
-        print(f"  last   7 days   {_new_installs_last(conn, 7, now)}")
-    finally:
-        conn.close()
+    _print_header("New installs (first seen within window)")
+    print(f"  last   7 days   {_new_installs_last(engine, 7, now)}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print a summary of Tesserae aggregate stats.")
     parser.add_argument(
-        "--db", type=Path, default=None, help="Path to stats.db (default: from config)"
+        "--database-url",
+        default=None,
+        help="SQLAlchemy URL (default: from app config / TESSERAE_DATABASE_URL)",
     )
     args = parser.parse_args()
-    db_path = args.db or get_settings().stats_db_path
-    if not db_path.exists():
-        print(f"No stats database at {db_path}")
-        return 1
-    summarise(db_path)
+    url = args.database_url or get_settings().resolved_database_url
+    # Ensure the table exists so the reader works even before the app has started.
+    init_db(url)
+    summarise(url)
     return 0
 
 

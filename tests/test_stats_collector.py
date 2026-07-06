@@ -18,7 +18,7 @@ def _rows(db_path):
 
 
 def test_init_creates_table(settings):
-    collector.init_db(settings.stats_db_path)
+    collector.init_db(settings.resolved_database_url)
     conn = sqlite3.connect(str(settings.stats_db_path))
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(hits)")}
@@ -28,9 +28,9 @@ def test_init_creates_table(settings):
 
 
 def test_record_hit_persists(settings):
-    collector.init_db(settings.stats_db_path)
+    collector.init_db(settings.resolved_database_url)
     collector.record_hit(
-        settings.stats_db_path,
+        settings.resolved_database_url,
         install_uuid="3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         country="AU",
         region="New South Wales",
@@ -47,9 +47,9 @@ def test_record_hit_persists(settings):
 
 
 def test_record_hit_null_uuid(settings):
-    collector.init_db(settings.stats_db_path)
+    collector.init_db(settings.resolved_database_url)
     collector.record_hit(
-        settings.stats_db_path,
+        settings.resolved_database_url,
         install_uuid=None,
         country=None,
         region=None,
@@ -62,9 +62,9 @@ def test_record_hit_null_uuid(settings):
 
 
 def test_record_hit_autotimestamps(settings):
-    collector.init_db(settings.stats_db_path)
+    collector.init_db(settings.resolved_database_url)
     collector.record_hit(
-        settings.stats_db_path,
+        settings.resolved_database_url,
         install_uuid=None,
         country=None,
         region=None,
@@ -73,6 +73,8 @@ def test_record_hit_autotimestamps(settings):
     )
     ts = _rows(settings.stats_db_path)[0]["ts"]
     parsed = datetime.fromisoformat(ts)
+    if parsed.tzinfo is None:  # SQLite stores DateTime without an offset.
+        parsed = parsed.replace(tzinfo=UTC)
     assert abs(datetime.now(UTC) - parsed) < timedelta(minutes=5)
 
 

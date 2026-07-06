@@ -19,7 +19,7 @@ log = logging.getLogger("tesserae_api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    collector.init_db(settings.stats_db_path)
+    collector.init_db(settings.resolved_database_url)
     # Cold start: if there is no cache yet, try a best-effort poll so the very
     # first request (and the post-deploy smoke test) has data to serve.
     if github_releases.load_cache(settings.version_cache_path) is None:
@@ -29,12 +29,13 @@ async def lifespan(app: FastAPI):
             log.warning("initial GitHub poll failed: %s", exc)
     yield
     geo.close()
+    collector.dispose()
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Tesserae API",
-        version="0.1.0",
+        version="0.2.0",
         description="Public JSON API for Tesserae widgets.",
         lifespan=lifespan,
     )

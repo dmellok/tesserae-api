@@ -21,8 +21,11 @@ License: AGPL-3.0-or-later.
      v
 [ tesserae-api container (docker compose) ]
      |-- FastAPI + uvicorn (:8000)
-     |-- /data volume  <- stats.db, version_cache.json
+     |-- /data volume  <- version_cache.json
      |-- GeoLite2 mmdb  (baked into the image at build time)
+     |
+     v  postgresql (container network)
+[ postgres container ]  aggregate stats, named volume, 127.0.0.1:5432 (SSH tunnel only)
 
 [ systemd timer: tesserae-api-poll.timer ]  every 15 min
      |
@@ -44,7 +47,7 @@ src/tesserae_api/
   config.py                settings (paths, repo slug, GitHub token)
   routes/version.py        GET /version/latest
   cache/github_releases.py GitHub polling, cache read/write, channel resolution
-  stats/collector.py       SQLite aggregate writes
+  stats/collector.py       aggregate writes (SQLAlchemy: SQLite dev, Postgres prod)
   stats/geo.py             MaxMind GeoLite2 lookup
 scripts/
   poll_github.py           run by the systemd timer
@@ -107,11 +110,13 @@ Interactive OpenAPI docs are served at `/docs`.
 
 ## Aggregate stats collected
 
-One row per served request, stored in SQLite at `/data/stats.db`:
+One row per served request. Storage is a SQLAlchemy URL: a local SQLite file in
+development, PostgreSQL in production (the `postgres` service in docker-compose).
+Set `TESSERAE_DATABASE_URL` to switch; unset defaults to `sqlite:///data/stats.db`.
 
 ```sql
 CREATE TABLE hits (
-  ts DATETIME NOT NULL,
+  ts TIMESTAMPTZ NOT NULL,    -- DATETIME under SQLite
   install_uuid TEXT,          -- client-generated UUID, NULL if the client omitted it
   country TEXT,               -- coarse geo from MaxMind, IP discarded after lookup
   region TEXT,
@@ -133,16 +138,31 @@ user resets their widget config they get a new UUID and count as a new install. 
 
 ## How to read stats
 
+Summary reader (talks to whatever `TESSERAE_DATABASE_URL` points at):
+
 ```bash
-# On the VPS:
+# On the VPS (uses the container's Postgres config):
 docker exec tesserae-api python -m scripts.dump_stats
-# Or point at the host copy of the DB:
-python -m scripts.dump_stats --db /var/lib/tesserae-api/stats.db
+# Or against an explicit URL:
+python -m scripts.dump_stats --database-url postgresql+psycopg://tesserae:PW@localhost:5432/tesserae
 ```
 
 Prints: total unique installs, unique installs by country, version distribution, channel
 distribution, retention (installs seen within the last 7 / 30 / 90 days), and new installs in the
 last 7 days (first-seen UUIDs).
+
+### Remote / ODBC access
+
+Postgres listens only on the VPS loopback and is never exposed publicly. Reach it from your machine
+over an SSH tunnel, then point psql or any ODBC/BI tool at `localhost:5432`:
+
+```bash
+ssh -N -L 5432:127.0.0.1:5432 deploy@api.tesserae.ink   # leave running
+psql "host=localhost port=5432 dbname=tesserae user=tesserae"
+```
+
+See [BOOTSTRAP.md](BOOTSTRAP.md) for the ODBC DSN details. The password is in
+`/opt/tesserae-api/.env` on the VPS.
 
 ## Local development
 
@@ -202,6 +222,11 @@ Secrets live in the repo's Settings -> Secrets and variables -> Actions:
 
 For the GHCR login the deploy user uses on the VPS, generate a new GitHub PAT with `read:packages`
 and re-run `docker login ghcr.io` as shown in BOOTSTRAP.md.
+
+The database password is not a GitHub secret; it lives in `/opt/tesserae-api/.env` on the VPS as
+`POSTGRES_PASSWORD`. To rotate it, update the password in Postgres
+(`ALTER ROLE tesserae WITH PASSWORD ...`), edit the `.env`, and `docker compose up -d` to restart
+the API with the new value.
 
 ### Image visibility
 

@@ -110,9 +110,12 @@ SEED_CACHE = {
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """A Settings instance pointing every path at an isolated tmp dir."""
+    from tesserae_api.stats import collector
+
     get_settings.cache_clear()
     s = Settings(data_dir=tmp_path)
     yield s
+    collector.dispose()
     get_settings.cache_clear()
 
 
