@@ -246,11 +246,16 @@ def resolve_main(cache: dict[str, Any], current: str | None) -> dict[str, Any]:
 
 
 def _extract_sha(current: str | None) -> str | None:
-    """Pull the sha out of a main-channel version like "0.69.18+abc1234" or "abc1234"."""
+    """Pull the sha out of a main-channel version like "0.69.18+abc1234" or "abc1234".
+
+    A literal "+" in a URL query string decodes to a space, so a caller that fails
+    to percent-encode it sends "0.69.18 abc1234". Accept whitespace as an equivalent
+    separator so the sha is still recovered.
+    """
     if not current:
         return None
-    candidate = current.split("+", 1)[1] if "+" in current else current
-    candidate = candidate.strip().lower()
+    parts = current.replace("+", " ").split()
+    candidate = (parts[-1] if parts else "").lower()
     if candidate in {"", "main"}:
         return None
     if all(c in "0123456789abcdef" for c in candidate) and len(candidate) >= 4:

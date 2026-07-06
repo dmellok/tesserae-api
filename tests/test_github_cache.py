@@ -190,9 +190,19 @@ def test_resolve_edge():
 def test_extract_sha_variants():
     assert gh._extract_sha("0.69.18+abc1234") == "abc1234"
     assert gh._extract_sha("abc1234") == "abc1234"
+    # A "+" decoded to a space by the query string must still resolve.
+    assert gh._extract_sha("0.69.18 abc1234") == "abc1234"
     assert gh._extract_sha("main") is None
+    assert gh._extract_sha("0.69.18") is None
     assert gh._extract_sha(None) is None
     assert gh._extract_sha("") is None
+
+
+def test_resolve_main_space_separated_sha():
+    # Caller sent "0.69.18+abc1234" but the "+" arrived as a space.
+    out = gh.resolve_main(SEED_CACHE, "0.69.18 abc1234")
+    assert out["commits_behind"] == 5
+    assert out["is_current"] is False
 
 
 def test_empty_cache_resolves_to_null():
