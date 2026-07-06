@@ -35,7 +35,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+# Pin the app UID/GID so the host /data bind mount can be chowned to a known
+# owner (999). Without a stable id the /data volume permissions break on rebuild.
+RUN groupadd --system --gid 999 app \
+    && useradd --system --uid 999 --gid 999 --home-dir /app app
 
 COPY --from=build /app/.venv /app/.venv
 COPY src ./src

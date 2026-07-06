@@ -43,7 +43,10 @@ sudo systemctl restart caddy
 
 ```bash
 sudo mkdir -p /opt/tesserae-api /var/lib/tesserae-api /var/log/caddy
-sudo chown -R deploy:deploy /opt/tesserae-api /var/lib/tesserae-api
+sudo chown -R deploy:deploy /opt/tesserae-api
+# The API container runs as uid 999 (the "app" user baked into the image). The
+# /data bind mount must be owned by that uid or the app cannot create stats.db.
+sudo chown -R 999:999 /var/lib/tesserae-api
 sudo chown -R caddy:caddy /var/log/caddy
 ```
 
