@@ -230,7 +230,10 @@ the API with the new value.
 
 ### Image visibility
 
-The repository is private, so the published `ghcr.io/dmellok/tesserae-api` package defaults to
-private and the VPS deploy user must be logged in to GHCR to pull it (BOOTSTRAP.md step 6). To drop
-that requirement, make only the package public: Profile -> Packages -> tesserae-api -> Package
-settings -> Change visibility -> Public. The repo can stay private either way.
+The published `ghcr.io/dmellok/tesserae-api` image will be public once the maintainer flips the
+package visibility, so any Tesserae install can pull it without authentication and
+`docker compose pull` works unattended. To run your own copy of the API, follow BOOTSTRAP.md
+against your own VPS and point your widgets at your own host.
+
+If you prefer to keep the image private (repo public, image private), the deploy user needs a GHCR
+login on the VPS. See BOOTSTRAP.md step 6.

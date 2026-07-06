@@ -65,52 +65,45 @@ sudo chmod 600 /opt/tesserae-api/.env
 
 ## 5. Install the compose file and Caddyfile
 
-The repo is private, so `scp` these two files up from your local checkout (the
-raw.githubusercontent.com URLs 404 without auth):
+Fetch both files from the repo (run on the VPS):
 
 ```bash
-# From your workstation, in the repo checkout:
-scp docker-compose.yml deploy@<vps>:/opt/tesserae-api/docker-compose.yml
-scp Caddyfile deploy@<vps>:/tmp/Caddyfile
-ssh deploy@<vps> 'sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy'
+sudo -u deploy bash -c '
+  cd /opt/tesserae-api
+  curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/dmellok/tesserae-api/main/docker-compose.yml
+'
+sudo curl -fsSL -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dmellok/tesserae-api/main/Caddyfile
+sudo systemctl reload caddy
 ```
 
 Point the DNS A record for `api.tesserae.ink` at this VPS now. Caddy will obtain a
 Let's Encrypt certificate automatically on the first request once DNS resolves.
 
-## 6. Log in to GHCR as the deploy user (required)
+## 6. Log in to GHCR as the deploy user (optional)
 
-The repository is private, so the published image defaults to private and the
-deploy user must authenticate to pull it. Create a GitHub Personal Access Token
-with the `read:packages` scope, then:
+This step is only needed if the GHCR image is private. If the `tesserae-api`
+package has been set to public visibility, `docker compose pull` works
+unauthenticated and you can skip to step 7.
+
+For a private image, create a GitHub Personal Access Token with the
+`read:packages` scope, then:
 
 ```bash
 sudo -u deploy bash -c 'echo <GHCR_TOKEN> | docker login ghcr.io -u dmellok --password-stdin'
 ```
 
 The credential is stored in `/home/deploy/.docker/config.json` and persists, so
-`docker compose pull` in the deploy workflow works unattended. If you later make
-only the package public (repo stays private), this login becomes optional.
-
-The step 5 fetch commands above use raw.githubusercontent.com, which is not
-available for a private repo. For a private repo, `scp` the two files up instead:
-
-```bash
-# From your workstation, in the repo checkout:
-scp docker-compose.yml deploy@<vps>:/opt/tesserae-api/docker-compose.yml
-scp Caddyfile deploy@<vps>:/tmp/Caddyfile && ssh deploy@<vps> 'sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile'
-# Same for the systemd units in step 7.
-```
+`docker compose pull` in the deploy workflow works unattended.
 
 ## 7. Install the systemd poll timer
 
-`scp` the two unit files up from your local checkout (private repo, so no raw URL):
+Fetch the two unit files from the repo (run on the VPS):
 
 ```bash
-# From your workstation:
-scp systemd/tesserae-api-poll.service systemd/tesserae-api-poll.timer deploy@<vps>:/tmp/
-ssh deploy@<vps> 'sudo mv /tmp/tesserae-api-poll.* /etc/systemd/system/ && \
-  sudo systemctl daemon-reload && sudo systemctl enable --now tesserae-api-poll.timer'
+sudo curl -fsSL -o /etc/systemd/system/tesserae-api-poll.service https://raw.githubusercontent.com/dmellok/tesserae-api/main/systemd/tesserae-api-poll.service
+sudo curl -fsSL -o /etc/systemd/system/tesserae-api-poll.timer https://raw.githubusercontent.com/dmellok/tesserae-api/main/systemd/tesserae-api-poll.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now tesserae-api-poll.timer
 ```
 
 ## 8. Start the service
@@ -143,8 +136,11 @@ psql or an ODBC/BI tool, forward the port over your existing SSH login:
 
 ```bash
 # On your workstation, leave this running:
-ssh -N -L 5432:127.0.0.1:5432 kayden@api.tesserae.ink
+ssh -N -L 5432:127.0.0.1:5432 <sudo-user>@api.tesserae.ink
 ```
+
+(`<sudo-user>` is the sudo-capable account you created when provisioning the VPS,
+distinct from the `deploy` user that the CI workflow uses.)
 
 Then connect a client to `localhost:5432`:
 
