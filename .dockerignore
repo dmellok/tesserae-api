@@ -1,0 +1,20 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+htmlcov
+.coverage
+.env
+*.local
+.DS_Store
+# Keep runtime state out of the build context. Keep .gitkeep so the data/ dir is
+# always present (so `COPY data/` never fails), plus the mmdb that CI drops in.
+data/*
+!data/.gitkeep
+!data/geoip.mmdb

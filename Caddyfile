@@ -1,0 +1,42 @@
+# Deployed to /etc/caddy/Caddyfile on the VPS.
+#
+# Requires the rate_limit module. The official Caddy binary can add it in place:
+#   sudo caddy add-package github.com/mholt/caddy-ratelimit
+#   sudo systemctl restart caddy
+# See BOOTSTRAP.md.
+
+api.tesserae.ink {
+	encode zstd gzip
+
+	# Per-IP rate limit: 60 requests/minute, keyed on the client address.
+	rate_limit {
+		zone perip {
+			key {remote_host}
+			events 60
+			window 1m
+		}
+	}
+
+	reverse_proxy 127.0.0.1:8000
+
+	# Access log deliberately strips IP and User-Agent. What remains: ts, method,
+	# uri, status, size, duration. Nothing that identifies a caller is written.
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip delete
+				request>remote_port delete
+				request>client_ip delete
+				request>headers delete
+				resp_headers delete
+				bytes_read delete
+				user_id delete
+			}
+		}
+	}
+}

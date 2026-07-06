@@ -1,0 +1,29 @@
+# Deployed to /opt/tesserae-api/docker-compose.yml on the VPS.
+# `docker compose pull && docker compose up -d` runs the published image.
+services:
+  api:
+    image: ghcr.io/dmellok/tesserae-api:latest
+    container_name: tesserae-api
+    restart: unless-stopped
+    # Bind to host loopback only; Caddy terminates TLS and reverse-proxies to it.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Persist stats.db and version_cache.json across container replacement.
+      - /var/lib/tesserae-api:/data
+    environment:
+      TESSERAE_DATA_DIR: /data
+      TESSERAE_GEOIP_PATH: /app/geoip/geoip.mmdb
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # 1 vCPU / 1GB VPS: keep memory bounded.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

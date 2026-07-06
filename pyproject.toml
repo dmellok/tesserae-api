@@ -1,0 +1,49 @@
+[project]
+name = "tesserae-api"
+version = "0.1.0"
+description = "Public JSON API server for Tesserae widgets (api.tesserae.ink)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "dmellok" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "geoip2>=4.8",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "packaging>=24.1",
+]
+
+[project.urls]
+Homepage = "https://api.tesserae.ink"
+Source = "https://github.com/dmellok/tesserae-api"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tesserae_api"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+# FastAPI relies on callables (Query/Depends) as argument defaults.
+extend-ignore = ["B008"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

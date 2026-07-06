@@ -1,0 +1,5 @@
+# This directory holds runtime state on the VPS:
+#   version_cache.json  - cached GitHub poll results
+#   stats.db            - SQLite aggregate stats
+#   geoip.mmdb          - MaxMind GeoLite2 database (baked into the image)
+# The contents are gitignored. This file only keeps the directory present.

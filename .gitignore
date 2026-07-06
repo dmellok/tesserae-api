@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# uv
+.uv/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime state (lives on the VPS, never committed)
+/data/*
+!/data/.gitkeep
+
+# Local env
+.env
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

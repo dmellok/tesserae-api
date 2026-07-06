@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Tesserae API version cache from GitHub
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Runs inside the already-running container so it writes to the same /data volume.
+ExecStart=/usr/bin/docker exec tesserae-api python -m scripts.poll_github
+# A failed poll is non-fatal: the API keeps serving the last known good cache.
+SuccessExitStatus=0 1
