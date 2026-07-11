@@ -26,6 +26,9 @@ htmlcov/
 .env
 *.local
 
+# Internal ops / integration docs (kept local, not published in the public repo)
+/docs/analytics-integration.md
+
 # Editor / OS
 .DS_Store
 .idea/
