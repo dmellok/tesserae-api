@@ -152,6 +152,38 @@ For ODBC, install the PostgreSQL driver (psqlODBC) and point the DSN at
 `localhost:5432`. Everything rides the encrypted SSH channel; no new firewall
 rules are needed.
 
+## 11. Database backups
+
+`scripts/backup_db.sh` dumps the database to a gzipped SQL file under
+`/opt/tesserae-api/backups` and prunes files older than 7 days. Install it and
+schedule a daily run as the deploy user (no sudo needed):
+
+```bash
+scp scripts/backup_db.sh deploy@<vps>:/opt/tesserae-api/backup_db.sh
+ssh deploy@<vps> '
+  chmod +x /opt/tesserae-api/backup_db.sh
+  /opt/tesserae-api/backup_db.sh   # take one now
+  ( crontab -l 2>/dev/null | grep -v backup_db.sh
+    echo "0 3 * * * /opt/tesserae-api/backup_db.sh >> /opt/tesserae-api/backups/backup.log 2>&1"
+  ) | crontab -
+'
+```
+
+Alternatively use the systemd units in `systemd/` (runs as root, daily 03:00 UTC):
+
+```bash
+scp systemd/tesserae-api-backup.* deploy@<vps>:/tmp/
+ssh -t <sudo-user>@<vps> 'sudo mv /tmp/tesserae-api-backup.* /etc/systemd/system/ && \
+  sudo systemctl daemon-reload && sudo systemctl enable --now tesserae-api-backup.timer'
+```
+
+Restore a dump into the running database:
+
+```bash
+gunzip -c /opt/tesserae-api/backups/tesserae-<stamp>.sql.gz | \
+  docker exec -i tesserae-postgres psql -U tesserae -d tesserae
+```
+
 ## GitHub secrets to add first
 
 In the `tesserae-api` repo: Settings -> Secrets and variables -> Actions.
