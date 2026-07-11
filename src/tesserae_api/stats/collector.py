@@ -1,12 +1,15 @@
 """Aggregate stats collection.
 
-One row is written per served request. The only fields stored are:
+The `hits` table records one row per update-check request. The only fields stored are:
   ts               request timestamp (UTC)
   install_uuid     client-generated UUID (NULL if the client omitted it)
   country, region  coarse geo, derived from the caller IP then the IP is discarded
   channel          requested channel (version endpoint)
   kind             device kind (firmware endpoint)
   current_version  the caller's reported current version
+
+The `widget_installs` table records one row per widget-install event reported by
+an app backend (POST /widgets/install), for per-widget unique install counts.
 
 No IP addresses and no User-Agent strings are ever written.
 
@@ -26,8 +29,10 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    func,
     insert,
     inspect,
+    select,
     text,
 )
 from sqlalchemy.engine import Engine
@@ -46,6 +51,19 @@ hits = Table(
     Column("current_version", String),
     Index("idx_hits_install", "install_uuid"),
     Index("idx_hits_ts", "ts"),
+)
+
+widget_installs = Table(
+    "widget_installs",
+    metadata,
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("widget_id", String, nullable=False),
+    Column("install_uuid", String),
+    Column("tesserae_version", String),
+    Column("country", String),
+    Column("region", String),
+    Index("idx_widget_installs_widget", "widget_id"),
+    Index("idx_widget_installs_install", "install_uuid"),
 )
 
 # Columns added after the initial schema shipped, applied to pre-existing tables.
@@ -104,6 +122,47 @@ def record_hit(
                 current_version=current_version,
             )
         )
+
+
+def record_widget_install(
+    url: str,
+    *,
+    widget_id: str,
+    install_uuid: str | None,
+    tesserae_version: str | None,
+    country: str | None,
+    region: str | None,
+    ts: datetime | None = None,
+) -> None:
+    """Insert one widget-install event. `install_uuid` may be None (no dedup possible)."""
+    ts = ts or datetime.now(UTC)
+    engine = get_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            insert(widget_installs).values(
+                ts=ts,
+                widget_id=widget_id,
+                install_uuid=install_uuid,
+                tesserae_version=tesserae_version,
+                country=country,
+                region=region,
+            )
+        )
+
+
+def widget_install_counts(url: str, widget_id: str | None = None) -> dict[str, int]:
+    """Unique install counts (COUNT DISTINCT install_uuid) per widget.
+
+    NULL install_uuid rows are excluded from the distinct count by SQL semantics.
+    Optionally filtered to a single widget_id.
+    """
+    engine = get_engine(url)
+    count = func.count(func.distinct(widget_installs.c.install_uuid))
+    stmt = select(widget_installs.c.widget_id, count).group_by(widget_installs.c.widget_id)
+    if widget_id is not None:
+        stmt = stmt.where(widget_installs.c.widget_id == widget_id)
+    with engine.connect() as conn:
+        return {row[0]: row[1] for row in conn.execute(stmt)}
 
 
 def dispose() -> None:

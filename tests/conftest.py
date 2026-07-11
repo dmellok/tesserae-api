@@ -191,6 +191,7 @@ def client(seeded_settings: Settings, monkeypatch):
     # Route and app modules import get_settings by name, patch those references too.
     monkeypatch.setattr("tesserae_api.routes.version.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.routes.firmware.get_settings", lambda: seeded_settings)
+    monkeypatch.setattr("tesserae_api.routes.widgets.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.main.get_settings", lambda: seeded_settings)
 
     app = create_app()

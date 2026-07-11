@@ -148,6 +148,32 @@ yet (for example a source repo that has not cut a release) returns `503`. Adding
 is a `firmware_sources.yaml` edit plus a redeploy, no code change. Only the `stable` channel is
 implemented; `edge`/`main` are placeholders in the config schema.
 
+### `POST /widgets/install`
+
+Records one widget-install event, called server-to-server by an app backend when a user installs a
+widget from the marketplace. JSON body:
+
+```json
+{ "widget": "spotify", "install": "<uuid>", "version": "0.93.0" }
+```
+
+`widget` is required (a catalog id); `install` is the app-level install UUID (opaque, dedupe key);
+`version` is the app's Tesserae version (optional). Missing `widget` returns `400`. On success the
+endpoint returns `204 No Content` with `Cache-Control: no-store`. The write is best-effort and never
+fails the response. Same privacy posture as the other endpoints: coarse geo from the IP, then the IP
+is discarded; no IP or User-Agent is stored.
+
+### `GET /widgets/installs`
+
+Unique install counts per widget for the Browse UI (`Cache-Control: public, max-age=300`):
+
+```json
+{ "counts": { "spotify": 42, "weather_now": 130 } }
+```
+
+Counts are `COUNT(DISTINCT install_uuid)` grouped by widget (rows with a NULL install UUID are
+excluded from the distinct count). `?widget=<id>` returns `{ "widget": "<id>", "count": <int> }`.
+
 Interactive OpenAPI docs are served at `/docs`.
 
 ## Aggregate stats collected
@@ -168,8 +194,12 @@ CREATE TABLE hits (
 );
 ```
 
-Both endpoints record hits. `/version/latest` sets `channel`; `/firmware/{kind}/latest` sets
-`kind`. Both honour the same optional `install` UUID contract.
+Both update-check endpoints record into `hits`. `/version/latest` sets `channel`;
+`/firmware/{kind}/latest` sets `kind`. Both honour the same optional `install` UUID contract.
+
+Widget installs use a separate `widget_installs` table (`ts, widget_id, install_uuid,
+tesserae_version, country, region`), written by `POST /widgets/install` and counted by
+`GET /widgets/installs`. The `hits` table is untouched by the widget path.
 
 What is deliberately **not** collected, ever:
 
