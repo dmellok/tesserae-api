@@ -184,6 +184,27 @@ gunzip -c /opt/tesserae-api/backups/tesserae-<stamp>.sql.gz | \
   docker exec -i tesserae-postgres psql -U tesserae -d tesserae
 ```
 
+## 12. Culling test data
+
+`scripts/cull_test_data.sh` deletes rows whose `install_uuid` starts with the
+reserved test prefix (`7e57c0de-`). It is safe by construction: real v4 UUIDs are
+random and never match, so only traffic that opted in with the marker is removed.
+Test harnesses must send install UUIDs of the form `7e57c0de-...`.
+
+```bash
+scp scripts/cull_test_data.sh deploy@<vps>:/opt/tesserae-api/cull_test_data.sh
+ssh deploy@<vps> '
+  chmod +x /opt/tesserae-api/cull_test_data.sh
+  DRY_RUN=1 /opt/tesserae-api/cull_test_data.sh   # report match counts, delete nothing
+  ( crontab -l 2>/dev/null | grep -v cull_test_data.sh
+    echo "15 * * * * /opt/tesserae-api/cull_test_data.sh >> /opt/tesserae-api/backups/cull.log 2>&1"
+  ) | crontab -
+'
+```
+
+`DRY_RUN=1` reports the counts without deleting. Override the prefix with
+`TESSERAE_TEST_PREFIX`. A systemd timer alternative lives in `systemd/`.
+
 ## GitHub secrets to add first
 
 In the `tesserae-api` repo: Settings -> Secrets and variables -> Actions.
