@@ -192,6 +192,7 @@ def client(seeded_settings: Settings, monkeypatch):
     monkeypatch.setattr("tesserae_api.routes.version.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.routes.firmware.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.routes.widgets.get_settings", lambda: seeded_settings)
+    monkeypatch.setattr("tesserae_api.routes.heartbeat.get_settings", lambda: seeded_settings)
     monkeypatch.setattr("tesserae_api.main.get_settings", lambda: seeded_settings)
 
     app = create_app()

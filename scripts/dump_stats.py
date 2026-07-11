@@ -115,6 +115,37 @@ def summarise(url: str, now: datetime | None = None) -> None:
     _print_header("New installs (first seen within window)")
     print(f"  last   7 days   {_new_installs_last(engine, 7, now)}")
 
+    _summarise_heartbeats(url)
+
+
+def _summarise_heartbeats(url: str) -> None:
+    from tesserae_api.stats import collector
+
+    _print_header("Heartbeat active installs (distinct)")
+    for days in (1, 7, 30):
+        print(f"  last {days:>3} days   {collector.heartbeat_active_installs(url, days)}")
+
+    for title, column in (
+        ("Heartbeat version distribution (30d, distinct installs)", "version"),
+        ("Heartbeat deploy mix (30d)", "deploy"),
+        ("Heartbeat OS mix (30d)", "os"),
+        ("Heartbeat arch mix (30d)", "arch"),
+        ("Heartbeat transport mix (30d)", "transport"),
+    ):
+        _print_header(title)
+        rows = collector.heartbeat_distribution(url, column, 30)
+        for name, n in rows.items():
+            print(f"  {str(name):<20} {n}")
+        if not rows:
+            print("  (none)")
+
+    _print_header("Heartbeat per-kind active installs (30d)")
+    kinds = collector.heartbeat_kind_active_installs(url, 30)
+    for name, n in kinds.items():
+        print(f"  {str(name):<28} {n}")
+    if not kinds:
+        print("  (none)")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print a summary of Tesserae aggregate stats.")

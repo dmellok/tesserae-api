@@ -174,6 +174,34 @@ Unique install counts per widget for the Browse UI (`Cache-Control: public, max-
 Counts are `COUNT(DISTINCT install_uuid)` grouped by widget (rows with a NULL install UUID are
 excluded from the distinct count). `?widget=<id>` returns `{ "widget": "<id>", "count": <int> }`.
 
+### `POST /heartbeat`
+
+Called about once a day by an app backend (server-to-server) to report an install's presence and
+environment. JSON body (all fields optional):
+
+```json
+{
+  "install": "<uuid>", "version": "0.94.2", "channel": "stable",
+  "os": "linux", "arch": "arm64", "py": "3.12", "deploy": "docker",
+  "transport": "rest", "devices": "2-3",
+  "device_kinds": ["pimoroni_inky_4", "waveshare_spectra6_13"], "ha": true
+}
+```
+
+Returns `204 No Content` with `Cache-Control: no-store`. Two privacy properties are specific to the
+heartbeat:
+
+- **Only a day is stored, never a timestamp.** Heartbeat timing cannot become a sub-daily presence
+  trace.
+- **Idempotent per `(install, day)`.** Multiple pings on the same day upsert into one row (the
+  descriptive columns reflect the latest ping), so restarts do not inflate counts.
+
+Enum fields are coerced to their allowed sets rather than rejected: an unrecognised value becomes
+`other` (os/arch/py) or `unknown` (channel/deploy/transport/devices). `device_kinds` keeps only
+`^[a-z0-9_-]{1,64}$` slugs, deduped and capped at 32. Same geo posture as the other endpoints: the
+IP is used for a coarse country/region lookup then discarded. Install-level heartbeat rows are not
+exposed publicly; the maintainer reads aggregates via `scripts/dump_stats.py`.
+
 Interactive OpenAPI docs are served at `/docs`.
 
 ## Aggregate stats collected
@@ -200,6 +228,11 @@ Both update-check endpoints record into `hits`. `/version/latest` sets `channel`
 Widget installs use a separate `widget_installs` table (`ts, widget_id, install_uuid,
 tesserae_version, country, region`), written by `POST /widgets/install` and counted by
 `GET /widgets/installs`. The `hits` table is untouched by the widget path.
+
+Heartbeats use `heartbeats` (keyed `UNIQUE(day, install_uuid)`, upserted) and `heartbeat_kinds`
+(`UNIQUE(day, install_uuid, kind)`). These store a `day` (a `Date`), never a timestamp, and are
+written by `POST /heartbeat`. The `hits` and `widget_installs` tables are untouched by the heartbeat
+path.
 
 What is deliberately **not** collected, ever:
 
