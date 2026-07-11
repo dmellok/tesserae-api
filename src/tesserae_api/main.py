@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Tesserae API",
-        version="0.5.1",
+        version="0.6.0",
         description="Public JSON API for Tesserae widgets.",
         lifespan=lifespan,
     )

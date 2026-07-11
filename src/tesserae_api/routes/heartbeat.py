@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Request, Response, status
 
+from tesserae_api import blocklist
 from tesserae_api.config import Settings, get_settings
 from tesserae_api.stats import collector, geo
 
@@ -103,6 +104,10 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
     settings: Settings = get_settings()
     data = body or {}
 
+    version = _str(data.get("version"))
+    if blocklist.is_blocked(version, settings):
+        return blocklist.blocked_response(version)
+
     # Geo lookup happens on the IP, then the IP is dropped. It is never stored.
     ip = _client_ip(request)
     country, region = geo.lookup(ip, settings.geoip_db_path)
@@ -112,7 +117,7 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
         collector.record_heartbeat(
             settings.resolved_database_url,
             install_uuid=_normalise_install(data.get("install")),
-            version=_str(data.get("version")),
+            version=version,
             channel=_enum(data.get("channel"), _CHANNEL, "unknown"),
             os=_enum(data.get("os"), _OS, "other"),
             arch=_enum(data.get("arch"), _ARCH, "other"),

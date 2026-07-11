@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Firmware source config (baked into the image at /app/firmware_sources.yaml).
     firmware_sources_path: Path = Field(default=Path("firmware_sources.yaml"))
 
+    # Reported app versions to block from recording, as comma-separated prefixes.
+    # A caller reporting a blocked version is not recorded and gets a notice to
+    # stop or update. Used to keep an errant test harness or stale dev build out
+    # of the stats tables. Empty (default) blocks nothing.
+    blocked_versions: str = ""
+
     # GeoLite2 database. Baked into the image outside the /data volume so a weekly
     # image rebuild refreshes it without touching persistent state. Falls back to
     # data_dir/geoip.mmdb for local development.
@@ -69,6 +75,10 @@ class Settings(BaseSettings):
     @property
     def repo_slug(self) -> str:
         return f"{self.repo_owner}/{self.repo_name}"
+
+    @property
+    def blocked_version_prefixes(self) -> tuple[str, ...]:
+        return tuple(p.strip() for p in self.blocked_versions.split(",") if p.strip())
 
 
 @lru_cache

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from tesserae_api import blocklist
 from tesserae_api.cache import github_releases
 from tesserae_api.config import Settings, get_settings
 from tesserae_api.stats import collector, geo
@@ -60,6 +61,9 @@ def version_latest(
     install: str | None = Query(default=None),
 ) -> Response:
     settings: Settings = get_settings()
+    if blocklist.is_blocked(current, settings):
+        return blocklist.blocked_response(current)
+
     cache = github_releases.load_cache(settings.version_cache_path)
     if cache is None:
         return JSONResponse(

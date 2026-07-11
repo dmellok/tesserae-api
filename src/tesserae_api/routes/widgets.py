@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from tesserae_api import blocklist
 from tesserae_api.config import Settings, get_settings
 from tesserae_api.stats import collector, geo
 
@@ -48,6 +49,9 @@ def _normalise_install(install: str | None) -> str | None:
 @router.post("/widgets/install", status_code=status.HTTP_204_NO_CONTENT)
 def widget_install(request: Request, body: WidgetInstallBody) -> Response:
     settings: Settings = get_settings()
+
+    if blocklist.is_blocked(body.version, settings):
+        return blocklist.blocked_response(body.version)
 
     widget = (body.widget or "").strip()
     if not widget:
