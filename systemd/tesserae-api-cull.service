@@ -1,8 +1,0 @@
-[Unit]
-Description=Cull Tesserae test rows (reserved install UUID prefix)
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/tesserae-api/cull_test_data.sh
