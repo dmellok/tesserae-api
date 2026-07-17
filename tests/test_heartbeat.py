@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import UTC, datetime
 
 from tesserae_api.stats import collector
 
-DAY = date(2026, 7, 11)
+# Use today (UTC) so read helpers with an N-day window always include these rows.
+DAY = datetime.now(UTC).date()
 UUID_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 UUID_B = "11111111-1111-4111-8111-111111111111"
 
@@ -71,7 +72,7 @@ def test_distribution_and_kinds(settings):
         install_uuid=UUID_A,
         version="0.94.2",
         deploy="docker",
-        device_kinds=["pimoroni_inky_4", "waveshare_spectra6_13"],
+        device_kinds=[("pimoroni_inky_4", "1.3.1"), ("waveshare_spectra6_13", "2.0.0")],
         day=DAY,
     )
     collector.record_heartbeat(
@@ -79,23 +80,31 @@ def test_distribution_and_kinds(settings):
         install_uuid=UUID_B,
         version="0.94.2",
         deploy="pip",
-        device_kinds=["pimoroni_inky_4"],
+        device_kinds=[("pimoroni_inky_4", "1.3.1")],
         day=DAY,
     )
     assert collector.heartbeat_distribution(url, "version", days=1) == {"0.94.2": 2}
     assert collector.heartbeat_distribution(url, "deploy", days=1) == {"docker": 1, "pip": 1}
     kinds = collector.heartbeat_kind_active_installs(url, days=1)
     assert kinds == {"pimoroni_inky_4": 2, "waveshare_spectra6_13": 1}
+    fw = collector.heartbeat_kind_firmware(url, days=1)
+    assert ("pimoroni_inky_4", "1.3.1", 2) in fw
+    assert ("waveshare_spectra6_13", "2.0.0", 1) in fw
 
 
-def test_kinds_upsert_idempotent(settings):
+def test_kinds_upsert_updates_fw_version(settings):
     collector.init_db(settings.resolved_database_url)
     url = settings.resolved_database_url
-    for _ in range(2):
-        collector.record_heartbeat(
-            url, install_uuid=UUID_A, device_kinds=["pimoroni_inky_4"], day=DAY
-        )
-    assert len(_rows(settings.stats_db_path, "heartbeat_kinds")) == 1
+    collector.record_heartbeat(
+        url, install_uuid=UUID_A, device_kinds=[("esp32_client", "1.3.0")], day=DAY
+    )
+    # Re-ping the same day with a newer firmware version.
+    collector.record_heartbeat(
+        url, install_uuid=UUID_A, device_kinds=[("esp32_client", "1.3.1")], day=DAY
+    )
+    rows = _rows(settings.stats_db_path, "heartbeat_kinds")
+    assert len(rows) == 1  # still one row per (day, install, kind)
+    assert rows[0]["fw_version"] == "1.3.1"  # latest firmware wins
 
 
 # POST /heartbeat ------------------------------------------------------------
@@ -169,6 +178,30 @@ def test_post_heartbeat_device_kinds_sanitised(client, seeded_settings):
     rows = _rows(seeded_settings.stats_db_path, "heartbeat_kinds")
     stored = sorted(r["kind"] for r in rows)
     assert stored == ["another-1", "good_kind"]  # junk dropped, deduped
+
+
+def test_post_heartbeat_device_kinds_objects_with_fw(client, seeded_settings):
+    client.post(
+        "/heartbeat",
+        json={
+            "install": UUID_A,
+            "device_kinds": [
+                {"kind": "esp32_client", "fw_version": "1.3.1"},
+                {"kind": "pi_bin_client", "fw_version": "v2.0.0"},  # leading v tolerated
+                {"kind": "picpak_client", "fw_version": "not-a-version"},  # non-semver -> null
+                "trmnl_client",  # bare slug still accepted -> null fw
+            ],
+        },
+    )
+    rows = {
+        r["kind"]: r["fw_version"] for r in _rows(seeded_settings.stats_db_path, "heartbeat_kinds")
+    }
+    assert rows == {
+        "esp32_client": "1.3.1",
+        "pi_bin_client": "2.0.0",
+        "picpak_client": None,
+        "trmnl_client": None,
+    }
 
 
 def test_post_heartbeat_best_effort_no_5xx(client, monkeypatch):

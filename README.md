@@ -184,9 +184,18 @@ environment. JSON body (all fields optional):
   "install": "<uuid>", "version": "0.94.2", "channel": "stable",
   "os": "linux", "arch": "arm64", "py": "3.12", "deploy": "docker",
   "transport": "rest", "devices": "2-3",
-  "device_kinds": ["pimoroni_inky_4", "waveshare_spectra6_13"], "ha": true
+  "device_kinds": [
+    {"kind": "pimoroni_inky_4", "fw_version": "1.3.1"},
+    {"kind": "waveshare_spectra6_13", "fw_version": "2.0.0"}
+  ],
+  "ha": true
 }
 ```
+
+`device_kinds` accepts either objects `{"kind", "fw_version"}` or bare slug strings (in which case
+the firmware version is unknown). `fw_version` is a bare semver (one optional leading `v` is
+tolerated); non-semver values are stored as unknown. The latest firmware per (install, day, kind)
+wins on re-ping, and feeds the per-kind firmware map.
 
 Returns `204 No Content` with `Cache-Control: no-store`. Two privacy properties are specific to the
 heartbeat:
@@ -230,9 +239,9 @@ tesserae_version, country, region`), written by `POST /widgets/install` and coun
 `GET /widgets/installs`. The `hits` table is untouched by the widget path.
 
 Heartbeats use `heartbeats` (keyed `UNIQUE(day, install_uuid)`, upserted) and `heartbeat_kinds`
-(`UNIQUE(day, install_uuid, kind)`). These store a `day` (a `Date`), never a timestamp, and are
-written by `POST /heartbeat`. The `hits` and `widget_installs` tables are untouched by the heartbeat
-path.
+(`UNIQUE(day, install_uuid, kind)`, with a `fw_version` column for the reported firmware version per
+kind). These store a `day` (a `Date`), never a timestamp, and are written by `POST /heartbeat`. The
+`hits` and `widget_installs` tables are untouched by the heartbeat path.
 
 What is deliberately **not** collected, ever:
 

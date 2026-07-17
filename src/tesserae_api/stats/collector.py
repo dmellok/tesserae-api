@@ -118,12 +118,16 @@ heartbeat_kinds = Table(
     Column("day", Date, nullable=False),
     Column("install_uuid", String),
     Column("kind", String, nullable=False),
+    Column("fw_version", String),  # reported firmware version for this kind, if any
     UniqueConstraint("day", "install_uuid", "kind", name="uq_heartbeat_kinds"),
     Index("idx_heartbeat_kinds_kind", "kind"),
 )
 
-# Columns added after the initial schema shipped, applied to pre-existing tables.
-_ADDED_COLUMNS = {"kind": "VARCHAR"}
+# Columns added after a table first shipped, applied in place to pre-existing tables.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "hits": {"kind": "VARCHAR"},
+    "heartbeat_kinds": {"fw_version": "VARCHAR"},
+}
 
 # One engine per URL, reused across requests (SQLAlchemy pools connections).
 _engines: dict[str, Engine] = {}
@@ -145,11 +149,13 @@ def init_db(url: str) -> None:
 
 
 def _apply_added_columns(engine: Engine) -> None:
-    existing = {col["name"] for col in inspect(engine).get_columns("hits")}
-    for name, sql_type in _ADDED_COLUMNS.items():
-        if name not in existing:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE hits ADD COLUMN {name} {sql_type}"))
+    inspector = inspect(engine)
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {col["name"] for col in inspector.get_columns(table)}
+        for name, sql_type in columns.items():
+            if name not in existing:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
 
 
 def record_hit(
@@ -246,7 +252,7 @@ def record_heartbeat(
     ha: bool | None = None,
     country: str | None = None,
     region: str | None = None,
-    device_kinds: list[str] | None = None,
+    device_kinds: list[tuple[str, str | None]] | None = None,
     day: date | None = None,
 ) -> None:
     """Upsert one heartbeat for (day, install). Repeated pings the same day collapse
@@ -279,10 +285,13 @@ def record_heartbeat(
         )
         conn.execute(stmt)
 
-        for kind in device_kinds or []:
-            kind_stmt = ins(heartbeat_kinds).values(day=day, install_uuid=install_uuid, kind=kind)
-            kind_stmt = kind_stmt.on_conflict_do_nothing(
-                index_elements=["day", "install_uuid", "kind"]
+        for kind, fw_version in device_kinds or []:
+            kind_stmt = ins(heartbeat_kinds).values(
+                day=day, install_uuid=install_uuid, kind=kind, fw_version=fw_version
+            )
+            kind_stmt = kind_stmt.on_conflict_do_update(
+                index_elements=["day", "install_uuid", "kind"],
+                set_={"fw_version": kind_stmt.excluded.fw_version},
             )
             conn.execute(kind_stmt)
 
@@ -332,6 +341,24 @@ def heartbeat_kind_active_installs(url: str, days: int = 30) -> dict[str, int]:
     )
     with engine.connect() as conn:
         return {row[0]: row[1] for row in conn.execute(stmt)}
+
+
+def heartbeat_kind_firmware(url: str, days: int = 30) -> list[tuple[str, str | None, int]]:
+    """Distinct installs per (device kind, firmware version), over the last `days`.
+
+    Returns rows of (kind, fw_version, installs), ordered by kind then count.
+    """
+    engine = get_engine(url)
+    count = func.count(func.distinct(heartbeat_kinds.c.install_uuid)).label("n")
+    stmt = (
+        select(heartbeat_kinds.c.kind, heartbeat_kinds.c.fw_version, count)
+        .where(heartbeat_kinds.c.install_uuid.is_not(None))
+        .where(heartbeat_kinds.c.day >= _since(days))
+        .group_by(heartbeat_kinds.c.kind, heartbeat_kinds.c.fw_version)
+        .order_by(heartbeat_kinds.c.kind, count.desc())
+    )
+    with engine.connect() as conn:
+        return [(row[0], row[1], row[2]) for row in conn.execute(stmt)]
 
 
 def dispose() -> None:

@@ -146,6 +146,13 @@ def _summarise_heartbeats(url: str) -> None:
     if not kinds:
         print("  (none)")
 
+    _print_header("Heartbeat firmware by kind (30d, distinct installs)")
+    fw_rows = collector.heartbeat_kind_firmware(url, 30)
+    for kind, fw_version, n in fw_rows:
+        print(f"  {str(kind):<24} {str(fw_version or '(unknown)'):<14} {n}")
+    if not fw_rows:
+        print("  (none)")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print a summary of Tesserae aggregate stats.")

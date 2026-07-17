@@ -15,6 +15,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Request, Response, status
+from packaging.version import InvalidVersion, Version
 
 from tesserae_api import blocklist
 from tesserae_api.config import Settings, get_settings
@@ -84,18 +85,46 @@ def _ha(value: Any) -> bool | None:
     return None if value is None else bool(value)
 
 
-def _clean_kinds(value: Any) -> list[str]:
-    """Keep valid slugs, dedupe (order-preserving), cap at 32."""
+def _clean_fw(value: Any) -> str | None:
+    """Normalise a firmware version: bare semver, one optional leading v. Else None."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text[:1] in ("v", "V"):
+        text = text[1:]
+    if not text or len(text) > 40:
+        return None
+    try:
+        Version(text)
+    except (InvalidVersion, TypeError):
+        return None
+    return text
+
+
+def _clean_kinds(value: Any) -> list[tuple[str, str | None]]:
+    """Parse device_kinds into (kind, fw_version) pairs.
+
+    Each item may be a bare slug string or an object {"kind": ..., "fw_version": ...}.
+    Keeps valid slugs only, dedupes on kind (order-preserving), caps at 32, and
+    normalises the firmware version (non-semver becomes None).
+    """
     if not isinstance(value, list):
         return []
-    out: list[str] = []
+    out: list[tuple[str, str | None]] = []
     seen: set[str] = set()
     for item in value:
-        if isinstance(item, str) and item not in seen and _KIND_RE.match(item):
-            seen.add(item)
-            out.append(item)
-            if len(out) >= _MAX_KINDS:
-                break
+        if isinstance(item, str):
+            kind, fw = item, None
+        elif isinstance(item, dict):
+            kind, fw = item.get("kind"), item.get("fw_version")
+        else:
+            continue
+        if not isinstance(kind, str) or kind in seen or not _KIND_RE.match(kind):
+            continue
+        seen.add(kind)
+        out.append((kind, _clean_fw(fw)))
+        if len(out) >= _MAX_KINDS:
+            break
     return out
 
 
