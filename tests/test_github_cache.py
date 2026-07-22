@@ -210,3 +210,10 @@ def test_empty_cache_resolves_to_null():
     assert gh.resolve_stable(empty, "0.1.0")["latest"] is None
     assert gh.resolve_main(empty, "abc1234")["latest"] is None
     assert gh.resolve_edge(empty, "0.1.0")["latest"] is None
+
+
+def test_cache_is_current():
+    assert gh.cache_is_current(SEED_CACHE) is True
+    assert gh.cache_is_current(None) is False
+    assert gh.cache_is_current({"stable": {}}) is False  # missing releases/commits lists
+    assert gh.cache_is_current({"releases": [], "commits": []}) is True

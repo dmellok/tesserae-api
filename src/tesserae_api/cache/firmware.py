@@ -105,6 +105,15 @@ def poll_and_cache(settings: Settings | None = None) -> dict[str, Any]:
     return payload
 
 
+def cache_is_current(cache: dict[str, Any] | None) -> bool:
+    """True if the cache matches the current schema (a releases list).
+
+    A cache written by an older schema (or a missing file) returns False so the
+    app re-polls on startup instead of serving stale or unreadable data.
+    """
+    return isinstance(cache, dict) and isinstance(cache.get("releases"), list)
+
+
 def resolve(cache: dict[str, Any], kind: str) -> dict[str, Any] | None:
     """Return the {"latest": {...}} body for a kind, or None if no release covers it."""
     for release in cache.get("releases", []):

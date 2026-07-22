@@ -143,3 +143,36 @@ def test_strip_v_and_first_line():
     assert fw._strip_v("1.6.0") == "1.6.0"
     assert fw._first_line("line one\nline two") == "line one"
     assert len(fw._first_line("x" * 200)) == 100
+
+
+# cache schema guard ---------------------------------------------------------
+
+
+def test_cache_is_current():
+    assert fw.cache_is_current(SEED_FIRMWARE_CACHE) is True
+    assert fw.cache_is_current({"releases": []}) is True
+    assert fw.cache_is_current(None) is False
+    # Old per-kind schema (no "releases" list) is treated as not current.
+    assert fw.cache_is_current({"esp32_client": {"latest": {}}}) is False
+
+
+def test_lifespan_repolls_stale_firmware_cache(settings, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from tesserae_api import main as main_mod
+    from tesserae_api.cache import firmware, github_releases
+
+    monkeypatch.setattr(main_mod, "get_settings", lambda: settings)
+    # Version cache looks current, so it must not re-poll.
+    monkeypatch.setattr(github_releases, "load_cache", lambda p: {"releases": [], "commits": []})
+    monkeypatch.setattr(
+        github_releases, "poll_and_cache", lambda s=None: pytest.fail("version re-polled")
+    )
+    # Firmware cache is the old schema, so it must re-poll.
+    monkeypatch.setattr(firmware, "load_cache", lambda p: {"esp32_client": {}})
+    called = {}
+    monkeypatch.setattr(firmware, "poll_and_cache", lambda s=None: called.setdefault("fw", True))
+
+    with TestClient(main_mod.create_app()):
+        pass
+    assert called.get("fw") is True

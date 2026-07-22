@@ -138,6 +138,17 @@ def load_cache(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def cache_is_current(cache: dict[str, Any] | None) -> bool:
+    """True if the cache matches the current schema (releases + commits lists).
+
+    A cache written by an older schema (or a missing file) returns False so the
+    app re-polls on startup instead of serving stale or unreadable data.
+    """
+    if not isinstance(cache, dict):
+        return False
+    return isinstance(cache.get("releases"), list) and isinstance(cache.get("commits"), list)
+
+
 # ---------------------------------------------------------------------------
 # Channel resolution
 # ---------------------------------------------------------------------------

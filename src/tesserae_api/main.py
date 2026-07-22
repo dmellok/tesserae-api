@@ -21,14 +21,17 @@ log = logging.getLogger("tesserae_api")
 async def lifespan(app: FastAPI):
     settings = get_settings()
     collector.init_db(settings.resolved_database_url)
-    # Cold start: if there is no cache yet, try a best-effort poll so the very
-    # first request (and the post-deploy smoke test) has data to serve.
-    if github_releases.load_cache(settings.version_cache_path) is None:
+    # Cold start or a cache written by an older schema: best-effort re-poll so the
+    # very first request (and the post-deploy smoke test) has current data, rather
+    # than serving stale/unreadable cache until the next timer run.
+    version_cache = github_releases.load_cache(settings.version_cache_path)
+    if not github_releases.cache_is_current(version_cache):
         try:
             github_releases.poll_and_cache(settings)
         except Exception as exc:  # noqa: BLE001 - best effort, never fatal at boot
             log.warning("initial GitHub poll failed: %s", exc)
-    if firmware.load_cache(settings.firmware_cache_path) is None:
+    firmware_cache = firmware.load_cache(settings.firmware_cache_path)
+    if not firmware.cache_is_current(firmware_cache):
         try:
             firmware.poll_and_cache(settings)
         except Exception as exc:  # noqa: BLE001 - best effort, never fatal at boot
@@ -41,7 +44,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Tesserae API",
-        version="0.8.0",
+        version="0.8.1",
         description="Public JSON API for Tesserae widgets.",
         lifespan=lifespan,
     )
