@@ -1,95 +1,107 @@
-"""Integration tests for GET /firmware/{kind}/latest."""
+"""Integration tests for GET /firmware/{kind}/latest and its aggregate telemetry."""
 
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
+
+from tesserae_api.stats import collector
+
+DAY = datetime.now(UTC).date()
 
 
-def _rows(db_path):
+def _rows(db_path, table):
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        return conn.execute("SELECT * FROM hits ORDER BY ts").fetchall()
+        return conn.execute(f"SELECT * FROM {table}").fetchall()
     finally:
         conn.close()
 
 
-def test_firmware_shape(client):
-    resp = client.get("/firmware/picpak_client/latest", params={"current": "0.1.0-dev"})
+# route: resolution ----------------------------------------------------------
+
+
+def test_firmware_latest_shape(client):
+    resp = client.get("/firmware/seeed_reterminal_e1004/latest")
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "public, max-age=300"
     body = resp.json()
-    assert body["kind"] == "picpak_client"
-    assert body["current"] == "0.1.0-dev"
-    assert body["latest"] == {
-        "version": "0.1.1",
-        "released_at": "2026-07-01T09:00:00Z",
-        "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
-        "notes_headline": "Fix vflip regression",
-        "assets": [
-            {
-                "name": "picpak-firmware-v0.1.1.bin",
-                "download_url": "https://github.com/varanu5/picpak-tesserae-client/releases/download/v0.1.1/picpak-firmware-v0.1.1.bin",
-            }
-        ],
-    }
-    assert body["is_current"] is False
-    assert body["versions_behind"] == 1
+    assert set(body) == {"latest"}  # only "latest" at the top level
+    latest = body["latest"]
+    assert latest["version"] == "1.6.0"
+    assert latest["url"].endswith("/v1.6.0")
+    assert latest["notes_headline"] == "Safe Wi-Fi OTA for E1004"
+    assert latest["descriptor_url"].endswith("descriptor-seeed_reterminal_e1004.json")
+    assert latest["assets"][0]["name"] == "descriptor-seeed_reterminal_e1004.json"
+    assert latest["assets"][0]["content_type"] == "application/json"
 
 
-def test_firmware_is_current(client):
-    body = client.get("/firmware/picpak_client/latest", params={"current": "0.1.1"}).json()
-    assert body["is_current"] is True
-    assert body["versions_behind"] == 0
+def test_firmware_walks_back_to_older_release(client):
+    body = client.get("/firmware/legacy_kind/latest").json()
+    assert body["latest"]["version"] == "1.5.0"
 
 
-def test_firmware_no_current(client):
-    body = client.get("/firmware/esp32_client/latest").json()
-    assert body["current"] is None
-    assert body["is_current"] is None
-    assert body["versions_behind"] is None
-
-
-def test_firmware_empty_assets_ok(client):
-    body = client.get("/firmware/esp32_client/latest").json()
-    assert body["latest"]["version"] == "1.2.0"
-    assert body["latest"]["assets"] == []
-
-
-def test_firmware_unknown_kind_404(client):
+def test_firmware_unknown_kind_404_empty(client):
     resp = client.get("/firmware/no_such_kind/latest")
     assert resp.status_code == 404
+    assert resp.content == b""  # empty body
 
 
-def test_firmware_cold_cache_503(client, seeded_settings):
-    # Kind is configured but has no cached release yet.
+def test_firmware_cold_cache_404(client, seeded_settings):
     seeded_settings.firmware_cache_path.unlink()
-    resp = client.get("/firmware/picpak_client/latest")
-    assert resp.status_code == 503
-    assert resp.headers["cache-control"] == "no-store"
+    assert client.get("/firmware/seeed_reterminal_e1004/latest").status_code == 404
 
 
-def test_firmware_cors_header(client):
-    resp = client.get("/firmware/picpak_client/latest", headers={"Origin": "https://widget.local"})
-    assert resp.headers["access-control-allow-origin"] == "*"
+def test_firmware_current_param_accepted_response_unchanged(client):
+    with_current = client.get(
+        "/firmware/seeed_reterminal_e1004/latest", params={"current": "1.5.0"}
+    ).json()
+    without = client.get("/firmware/seeed_reterminal_e1004/latest").json()
+    assert with_current == without
 
 
-def test_firmware_records_stats_with_kind(client, seeded_settings):
-    uuid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
-    client.get(
-        "/firmware/picpak_client/latest",
-        params={"current": "0.1.0-dev", "install": uuid},
-    )
-    rows = _rows(seeded_settings.stats_db_path)
-    assert len(rows) == 1
-    assert rows[0]["kind"] == "picpak_client"
-    assert rows[0]["current_version"] == "0.1.0-dev"
-    assert rows[0]["install_uuid"] == uuid
-    assert rows[0]["channel"] is None  # channel is a version-endpoint field
+# route: aggregate telemetry -------------------------------------------------
 
 
-def test_firmware_missing_install_null_uuid(client, seeded_settings):
-    client.get("/firmware/picpak_client/latest", params={"current": "0.1.0-dev"})
-    rows = _rows(seeded_settings.stats_db_path)
-    assert rows[0]["install_uuid"] is None
-    assert rows[0]["kind"] == "picpak_client"
+def test_firmware_records_aggregate_not_hits(client, seeded_settings):
+    client.get("/firmware/seeed_reterminal_e1004/latest", params={"current": "1.5.0"})
+    fc = _rows(seeded_settings.stats_db_path, "firmware_check_stats")
+    assert len(fc) == 1
+    assert fc[0]["kind"] == "seeed_reterminal_e1004"
+    assert fc[0]["version"] == "1.5.0"
+    assert fc[0]["count"] == 1
+    # No per-request row lands in hits.
+    assert len(_rows(seeded_settings.stats_db_path, "hits")) == 0
+
+
+def test_firmware_checks_aggregate_by_day(client, seeded_settings):
+    for _ in range(3):
+        client.get("/firmware/seeed_reterminal_e1004/latest")  # no ?current -> "unknown"
+    rows = _rows(seeded_settings.stats_db_path, "firmware_check_stats")
+    assert len(rows) == 1  # one aggregate row
+    assert rows[0]["version"] == "unknown"
+    assert rows[0]["count"] == 3  # three checks collapsed into a count
+
+
+def test_firmware_404_records_nothing(client, seeded_settings):
+    client.get("/firmware/no_such_kind/latest")
+    assert len(_rows(seeded_settings.stats_db_path, "firmware_check_stats")) == 0
+
+
+# collector: aggregate counters ----------------------------------------------
+
+
+def test_record_firmware_check_upserts(settings):
+    collector.init_db(settings.resolved_database_url)
+    url = settings.resolved_database_url
+    collector.record_firmware_check(url, kind="seeed_ee02", version="1.5.0", country="AU", day=DAY)
+    collector.record_firmware_check(url, kind="seeed_ee02", version="1.5.0", country="AU", day=DAY)
+    collector.record_firmware_check(url, kind="seeed_ee02", version="1.6.0", country="AU", day=DAY)
+    collector.record_firmware_check(url, kind="seeed_ee02", version=None, country=None, day=DAY)
+
+    assert collector.firmware_check_totals(url, days=1) == {"seeed_ee02": 4}
+    versions = dict(((k, v), n) for k, v, n in collector.firmware_check_versions(url, days=1))
+    assert versions[("seeed_ee02", "1.5.0")] == 2  # deduped and counted
+    assert versions[("seeed_ee02", "1.6.0")] == 1
+    assert versions[("seeed_ee02", "unknown")] == 1  # NULL version -> sentinel

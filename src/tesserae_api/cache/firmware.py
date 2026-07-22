@@ -1,36 +1,27 @@
-"""Poll per-kind firmware release sources and cache them to disk.
+"""Poll the device firmware repo and cache the latest release per device kind.
 
-Each device kind in firmware_sources.yaml maps to a GitHub repository. The poller
-fetches that repository's releases, keeps the latest stable one (with its binary
-asset links), and caches the result keyed by kind. Requests are served entirely
-from the cache; if a source is unreachable at poll time its previous cached value
-is kept, so callers keep being served the last known good firmware.
+Source of truth: the newest published (non-draft, non-prerelease) release of a
+single GitHub repo (settings.firmware_repo) that carries a descriptor-<kind>.json
+asset for the requested kind. A release "covers" a kind iff it has that asset.
 
-This mirrors cache/github_releases.py (the /version/latest backend) but is kept
-separate so the version endpoint stays untouched.
+Requests are served entirely from the on-disk cache; if GitHub is unreachable at
+poll time the previous cache file is kept, so callers keep being served the last
+known good value. Kept separate from cache/github_releases.py so the version
+endpoint stays untouched.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import httpx
-import yaml
-from packaging.version import InvalidVersion, Version
 
-from tesserae_api.cache.github_releases import load_cache, write_cache
+from tesserae_api.cache.github_releases import load_cache as load_cache  # re-exported
+from tesserae_api.cache.github_releases import write_cache
 from tesserae_api.config import Settings, get_settings
 
-
-def load_sources(path: Path) -> dict[str, dict[str, Any]]:
-    """Parse firmware_sources.yaml into {kind: source}. Missing file -> {}."""
-    try:
-        with path.open(encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
-    except FileNotFoundError:
-        return {}
-    return data if isinstance(data, dict) else {}
+_DESCRIPTOR_PREFIX = "descriptor-"
+_DESCRIPTOR_SUFFIX = ".json"
 
 
 def _headers(settings: Settings) -> dict[str, str]:
@@ -44,34 +35,33 @@ def _headers(settings: Settings) -> dict[str, str]:
     return headers
 
 
-def _first_line(text: str) -> str:
-    return text.strip().splitlines()[0].strip() if text.strip() else ""
+def _strip_v(tag: str) -> str:
+    return tag[1:] if tag[:1] in ("v", "V") else tag
 
 
-def _release_summary(release: dict[str, Any]) -> dict[str, Any]:
-    tag = release.get("tag_name", "") or ""
-    assets = [
-        {"name": a.get("name"), "download_url": a.get("browser_download_url")}
-        for a in (release.get("assets") or [])
-    ]
+def _first_line(text: str, limit: int = 100) -> str:
+    line = text.strip().splitlines()[0].strip() if text.strip() else ""
+    return line[:limit]
+
+
+def _descriptor_kind(name: str) -> str | None:
+    if name.startswith(_DESCRIPTOR_PREFIX) and name.endswith(_DESCRIPTOR_SUFFIX):
+        return name[len(_DESCRIPTOR_PREFIX) : -len(_DESCRIPTOR_SUFFIX)]
+    return None
+
+
+def _asset_summary(asset: dict[str, Any]) -> dict[str, Any]:
     return {
-        "version": tag.lstrip("v"),
-        "prerelease": bool(release.get("prerelease")),
-        "released_at": release.get("published_at") or release.get("created_at"),
-        "url": release.get("html_url"),
-        "notes_headline": _first_line(release.get("name") or release.get("body") or ""),
-        "assets": assets,
+        "name": asset.get("name"),
+        "url": asset.get("browser_download_url"),
+        "size": asset.get("size"),
+        "content_type": asset.get("content_type"),
     }
 
 
-def build_kind_cache(
-    client: httpx.Client, settings: Settings, source: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Fetch releases for one source and return its cache entry, or None if empty."""
-    owner = source["owner"]
-    repo = source["repo"]
-    channel = source.get("channel", "stable")
-    url = f"{settings.github_api_base}/repos/{owner}/{repo}/releases"
+def build_cache(client: httpx.Client, settings: Settings) -> dict[str, Any]:
+    """Fetch releases and index each kind's descriptor asset, newest release first."""
+    url = f"{settings.github_api_base}/repos/{settings.firmware_repo}/releases"
     resp = client.get(
         url,
         params={"per_page": settings.history_limit},
@@ -79,83 +69,56 @@ def build_kind_cache(
         timeout=settings.github_timeout_seconds,
     )
     resp.raise_for_status()
-    releases = [_release_summary(r) for r in resp.json()]
-    if channel == "stable":
-        releases = [r for r in releases if not r["prerelease"]]
-    if not releases:
-        return None
-    return {"latest": releases[0], "versions": [r["version"] for r in releases]}
+
+    releases: list[dict[str, Any]] = []
+    for release in resp.json():
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        kinds: dict[str, dict[str, Any]] = {}
+        for asset in release.get("assets") or []:
+            kind = _descriptor_kind(asset.get("name", "") or "")
+            if kind is not None:
+                kinds[kind] = _asset_summary(asset)
+        if not kinds:
+            continue  # release covers no OTA kind
+        releases.append(
+            {
+                "version": _strip_v(release.get("tag_name", "") or ""),
+                "released_at": release.get("published_at"),
+                "url": release.get("html_url"),
+                "notes_headline": _first_line(release.get("body") or ""),
+                "kinds": kinds,
+            }
+        )
+
+    # Newest first, so resolve() returns the first release that covers a kind.
+    releases.sort(key=lambda r: r["released_at"] or "", reverse=True)
+    return {"releases": releases}
 
 
 def poll_and_cache(settings: Settings | None = None) -> dict[str, Any]:
-    """Refresh the firmware cache for every configured source.
-
-    A source that fails to fetch keeps its previous cached entry. Kinds removed
-    from the config are dropped from the cache.
-    """
+    """Fetch from GitHub and write the cache. On failure the old cache is kept."""
     settings = settings or get_settings()
-    sources = load_sources(settings.firmware_sources_path)
-    previous = load_cache(settings.firmware_cache_path) or {}
-
-    cache: dict[str, Any] = {}
     with httpx.Client() as client:
-        for kind, source in sources.items():
-            if source.get("type") != "github_releases":
-                continue
-            try:
-                entry = build_kind_cache(client, settings, source)
-            except Exception:
-                entry = None
-            if entry is not None:
-                cache[kind] = entry
-            elif kind in previous:
-                cache[kind] = previous[kind]
-
-    write_cache(cache, settings.firmware_cache_path)
-    return cache
+        payload = build_cache(client, settings)
+    write_cache(payload, settings.firmware_cache_path)
+    return payload
 
 
-def _safe_version(value: str | None) -> Version | None:
-    try:
-        return Version(value) if value else None
-    except (InvalidVersion, TypeError):
-        return None
-
-
-def _versions_behind(versions: list[str], current: str | None) -> int | None:
-    """Count cached versions strictly newer than current. None if unparseable."""
-    current_v = _safe_version(current)
-    if current_v is None:
-        return None
-    count = 0
-    for v in versions:
-        parsed = _safe_version(v)
-        if parsed is not None and parsed > current_v:
-            count += 1
-    return count
-
-
-def resolve(cache: dict[str, Any], kind: str, current: str | None) -> dict[str, Any] | None:
-    """Build the response body for a kind, or None if it has no cached data yet."""
-    entry = cache.get(kind)
-    if entry is None:
-        return None
-    latest = entry["latest"]
-    is_current = None
-    versions_behind = None
-    if current is not None:
-        is_current = current == latest["version"]
-        versions_behind = _versions_behind(entry.get("versions", []), current)
-    return {
-        "kind": kind,
-        "current": current,
-        "latest": {
-            "version": latest["version"],
-            "released_at": latest["released_at"],
-            "url": latest["url"],
-            "notes_headline": latest["notes_headline"],
-            "assets": latest.get("assets", []),
-        },
-        "is_current": is_current,
-        "versions_behind": versions_behind,
-    }
+def resolve(cache: dict[str, Any], kind: str) -> dict[str, Any] | None:
+    """Return the {"latest": {...}} body for a kind, or None if no release covers it."""
+    for release in cache.get("releases", []):
+        descriptor = release.get("kinds", {}).get(kind)
+        if descriptor is None:
+            continue
+        return {
+            "latest": {
+                "version": release["version"],
+                "released_at": release["released_at"],
+                "url": release["url"],
+                "notes_headline": release["notes_headline"],
+                "assets": [descriptor],
+                "descriptor_url": descriptor.get("url"),
+            }
+        }
+    return None

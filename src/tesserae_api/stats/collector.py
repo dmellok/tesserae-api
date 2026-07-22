@@ -32,6 +32,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Index,
+    Integer,
     MetaData,
     String,
     Table,
@@ -121,6 +122,21 @@ heartbeat_kinds = Table(
     Column("fw_version", String),  # reported firmware version for this kind, if any
     UniqueConstraint("day", "install_uuid", "kind", name="uq_heartbeat_kinds"),
     Index("idx_heartbeat_kinds_kind", "kind"),
+)
+
+# Aggregate-only counters for GET /firmware/<kind>/latest checks. No per-request
+# row, no IP, no install id: just counts per (day, kind, reported version, coarse
+# country). NULL-free key columns (sentinels below) so the upsert always dedupes.
+firmware_check_stats = Table(
+    "firmware_check_stats",
+    metadata,
+    Column("day", Date, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("version", String, nullable=False),  # reported ?current, or "unknown"
+    Column("country", String, nullable=False),  # coarse country, or "??"
+    Column("count", Integer, nullable=False),
+    UniqueConstraint("day", "kind", "version", "country", name="uq_firmware_check_stats"),
+    Index("idx_firmware_check_kind", "kind"),
 )
 
 # Columns added after a table first shipped, applied in place to pre-existing tables.
@@ -356,6 +372,59 @@ def heartbeat_kind_firmware(url: str, days: int = 30) -> list[tuple[str, str | N
         .where(heartbeat_kinds.c.day >= _since(days))
         .group_by(heartbeat_kinds.c.kind, heartbeat_kinds.c.fw_version)
         .order_by(heartbeat_kinds.c.kind, count.desc())
+    )
+    with engine.connect() as conn:
+        return [(row[0], row[1], row[2]) for row in conn.execute(stmt)]
+
+
+def record_firmware_check(
+    url: str,
+    *,
+    kind: str,
+    version: str | None,
+    country: str | None,
+    day: date | None = None,
+) -> None:
+    """Increment the aggregate counter for a firmware check. Aggregate only: no
+    per-request row, no IP, no install id. Missing version/country use sentinels
+    so the (day, kind, version, country) key never contains NULLs (which would
+    defeat the ON CONFLICT dedupe)."""
+    day = day or datetime.now(UTC).date()
+    key = {"day": day, "kind": kind, "version": version or "unknown", "country": country or "??"}
+    engine = get_engine(url)
+    ins = _upsert_insert(engine)
+    with engine.begin() as conn:
+        stmt = ins(firmware_check_stats).values(count=1, **key)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["day", "kind", "version", "country"],
+            set_={"count": firmware_check_stats.c.count + 1},
+        )
+        conn.execute(stmt)
+
+
+def firmware_check_totals(url: str, days: int = 30) -> dict[str, int]:
+    """Total firmware checks per kind over the last `days`."""
+    engine = get_engine(url)
+    total = func.sum(firmware_check_stats.c.count).label("n")
+    stmt = (
+        select(firmware_check_stats.c.kind, total)
+        .where(firmware_check_stats.c.day >= _since(days))
+        .group_by(firmware_check_stats.c.kind)
+        .order_by(total.desc())
+    )
+    with engine.connect() as conn:
+        return {row[0]: row[1] for row in conn.execute(stmt)}
+
+
+def firmware_check_versions(url: str, days: int = 30) -> list[tuple[str, str, int]]:
+    """Checks per (kind, reported version) over the last `days`."""
+    engine = get_engine(url)
+    total = func.sum(firmware_check_stats.c.count).label("n")
+    stmt = (
+        select(firmware_check_stats.c.kind, firmware_check_stats.c.version, total)
+        .where(firmware_check_stats.c.day >= _since(days))
+        .group_by(firmware_check_stats.c.kind, firmware_check_stats.c.version)
+        .order_by(firmware_check_stats.c.kind, total.desc())
     )
     with engine.connect() as conn:
         return [(row[0], row[1], row[2]) for row in conn.execute(stmt)]

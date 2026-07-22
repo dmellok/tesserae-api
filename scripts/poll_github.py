@@ -37,7 +37,9 @@ def main() -> int:
 
     try:
         firmware_cache = firmware.poll_and_cache(settings)
-        log.info("firmware cache refreshed: %d kinds", len(firmware_cache))
+        releases = firmware_cache.get("releases", [])
+        kinds = {k for r in releases for k in r.get("kinds", {})}
+        log.info("firmware cache refreshed: %d releases, %d kinds", len(releases), len(kinds))
     except Exception as exc:  # noqa: BLE001 - keep serving last known good on any failure
         log.error("firmware poll failed, keeping previous cache: %s", exc)
         failures += 1

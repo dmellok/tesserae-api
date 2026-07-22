@@ -43,7 +43,6 @@ RUN groupadd --system --gid 999 app \
 COPY --from=build /app/.venv /app/.venv
 COPY src ./src
 COPY scripts ./scripts
-COPY firmware_sources.yaml ./firmware_sources.yaml
 
 # Bake the GeoLite2 database in at a fixed path OUTSIDE the /data volume so a
 # weekly image rebuild refreshes it without disturbing persistent state. The

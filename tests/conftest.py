@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from tesserae_api.config import Settings, get_settings
 
@@ -108,52 +107,42 @@ SEED_CACHE = {
 }
 
 
-# Firmware source config, shaped as firmware_sources.yaml.
-SEED_FIRMWARE_SOURCES = {
-    "picpak_client": {
-        "type": "github_releases",
-        "owner": "varanu5",
-        "repo": "picpak-tesserae-client",
-        "channel": "stable",
-    },
-    "esp32_client": {
-        "type": "github_releases",
-        "owner": "dmellok",
-        "repo": "tesserae-device-firmware",
-        "channel": "stable",
-    },
-}
+def _descriptor(kind: str, version: str) -> dict:
+    url = f"https://github.com/dmellok/tesserae-device-firmware/releases/download/v{version}/descriptor-{kind}.json"
+    return {
+        "name": f"descriptor-{kind}.json",
+        "url": url,
+        "size": 412,
+        "content_type": "application/json",
+    }
 
-# Firmware cache, shaped as firmware.poll_and_cache() produces it.
+
+# Firmware cache, shaped as firmware.build_cache() produces it: releases newest
+# first, each indexing its descriptor-<kind>.json assets by kind.
 SEED_FIRMWARE_CACHE = {
-    "picpak_client": {
-        "latest": {
-            "version": "0.1.1",
-            "prerelease": False,
-            "released_at": "2026-07-01T09:00:00Z",
-            "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
-            "notes_headline": "Fix vflip regression",
-            "assets": [
-                {
-                    "name": "picpak-firmware-v0.1.1.bin",
-                    "download_url": "https://github.com/varanu5/picpak-tesserae-client/releases/download/v0.1.1/picpak-firmware-v0.1.1.bin",
-                }
-            ],
+    "releases": [
+        {
+            "version": "1.6.0",
+            "released_at": "2026-07-22T10:00:00Z",
+            "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.6.0",
+            "notes_headline": "Safe Wi-Fi OTA for E1004",
+            "kinds": {
+                "seeed_reterminal_e1004": _descriptor("seeed_reterminal_e1004", "1.6.0"),
+                "seeed_ee02": _descriptor("seeed_ee02", "1.6.0"),
+            },
         },
-        "versions": ["0.1.1"],
-    },
-    # No attached assets: an empty assets array is valid.
-    "esp32_client": {
-        "latest": {
-            "version": "1.2.0",
-            "prerelease": False,
-            "released_at": "2026-06-20T08:00:00Z",
-            "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.2.0",
-            "notes_headline": "Battery reporting",
-            "assets": [],
+        {
+            "version": "1.5.0",
+            "released_at": "2026-07-19T10:00:00Z",
+            "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.5.0",
+            "notes_headline": "Older release",
+            "kinds": {
+                "seeed_reterminal_e1004": _descriptor("seeed_reterminal_e1004", "1.5.0"),
+                # A kind only the older release covers, to exercise walking back.
+                "legacy_kind": _descriptor("legacy_kind", "1.5.0"),
+            },
         },
-        "versions": ["1.2.0", "1.1.0"],
-    },
+    ]
 }
 
 
@@ -163,9 +152,7 @@ def settings(tmp_path: Path) -> Settings:
     from tesserae_api.stats import collector
 
     get_settings.cache_clear()
-    sources_path = tmp_path / "firmware_sources.yaml"
-    sources_path.write_text(yaml.safe_dump(SEED_FIRMWARE_SOURCES), encoding="utf-8")
-    s = Settings(data_dir=tmp_path, firmware_sources_path=sources_path)
+    s = Settings(data_dir=tmp_path)
     yield s
     collector.dispose()
     get_settings.cache_clear()

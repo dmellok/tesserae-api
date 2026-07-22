@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     # to a postgresql+psycopg:// URL in production (see docker-compose.yml).
     database_url: str | None = None
 
-    # Firmware source config (baked into the image at /app/firmware_sources.yaml).
-    firmware_sources_path: Path = Field(default=Path("firmware_sources.yaml"))
+    # Firmware release source: a single GitHub repo whose releases carry
+    # descriptor-<kind>.json assets, one per OTA-capable device kind.
+    firmware_repo: str = "dmellok/tesserae-device-firmware"
 
     # Reported app versions to block from recording, as comma-separated prefixes.
     # A caller reporting a blocked version is not recorded and gets a notice to

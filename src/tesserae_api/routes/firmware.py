@@ -1,10 +1,18 @@
-"""GET /firmware/{kind}/latest - per-kind firmware update check plus aggregate stats."""
+"""GET /firmware/{kind}/latest - latest published firmware per device kind.
+
+Returns the newest release of the firmware repo that carries a
+descriptor-<kind>.json asset. Unknown kinds (or kinds no release covers) return
+404 with an empty body: the client treats any non-2xx as "no data" and hides the
+update badge, so 404 is the correct way to say "nothing to report".
+
+Telemetry is aggregate only: counts per (day, kind, reported version, coarse
+country). The caller IP is used for the country lookup then discarded; no IP, no
+install id, and no per-request row is retained.
+"""
 
 from __future__ import annotations
 
-import uuid
-
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from tesserae_api.cache import firmware
@@ -25,14 +33,13 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def _normalise_install(install: str | None) -> str | None:
-    """Accept a client-generated UUID as opaque. Invalid or absent -> None (no dedup)."""
-    if not install:
+def _normalise_version(current: str | None) -> str | None:
+    if not current:
         return None
-    try:
-        return str(uuid.UUID(install))
-    except (ValueError, AttributeError):
-        return None
+    text = current.strip()
+    if text[:1] in ("v", "V"):
+        text = text[1:]
+    return text[:40] or None
 
 
 @router.get("/firmware/{kind}/latest")
@@ -40,40 +47,29 @@ def firmware_latest(
     request: Request,
     kind: str,
     current: str | None = Query(default=None),
-    install: str | None = Query(default=None),
-) -> JSONResponse:
+) -> Response:
     settings: Settings = get_settings()
 
-    sources = firmware.load_sources(settings.firmware_sources_path)
-    if kind not in sources:
-        raise HTTPException(status_code=404, detail=f"unknown device kind: {kind}")
-
-    cache = firmware.load_cache(settings.firmware_cache_path) or {}
-    body = firmware.resolve(cache, kind, current)
+    cache = firmware.load_cache(settings.firmware_cache_path)
+    body = firmware.resolve(cache, kind) if cache else None
     if body is None:
-        # Kind is configured but has no cached release yet (cold start).
-        return JSONResponse(
-            {"detail": "firmware data not yet available"},
-            status_code=503,
-            headers={"Cache-Control": "no-store", "Retry-After": "60"},
-        )
+        # Unknown kind, uncovered kind, or cold cache: 404, empty body.
+        return Response(status_code=404)
 
-    # Geo lookup happens on the IP, then the IP is dropped. It is never stored.
+    # Aggregate-only telemetry: coarse country from the IP, then drop the IP.
     ip = _client_ip(request)
-    country, region = geo.lookup(ip, settings.geoip_db_path)
+    country, _region = geo.lookup(ip, settings.geoip_db_path)
     del ip
 
     try:
-        collector.record_hit(
+        collector.record_firmware_check(
             settings.resolved_database_url,
-            install_uuid=_normalise_install(install),
-            country=country,
-            region=region,
             kind=kind,
-            current_version=current,
+            version=_normalise_version(current),
+            country=country,
         )
     except Exception:
-        # Stats collection must never break the response the device depends on.
+        # Telemetry must never break the response the client depends on.
         pass
 
     return JSONResponse(body, headers={"Cache-Control": "public, max-age=300"})

@@ -1,8 +1,6 @@
-"""Unit tests for the firmware cache module: fetching, persistence, fallback, resolve."""
+"""Unit tests for the firmware cache module: descriptor-based resolution."""
 
 from __future__ import annotations
-
-import json
 
 import httpx
 import pytest
@@ -10,48 +8,59 @@ import pytest
 from tesserae_api.cache import firmware as fw
 from tests.conftest import SEED_FIRMWARE_CACHE
 
-# Raw GitHub /releases fixture for one source.
+
+def _asset(name: str) -> dict:
+    return {
+        "name": name,
+        "browser_download_url": f"https://example/{name}",
+        "size": 412,
+        "content_type": "application/json",
+    }
+
+
+# newest first: v1.6.0 covers e1004 + ee02, v1.5.0 also covers legacy_kind,
+# v1.6.0-rc1 is a prerelease (ignored), v1.4.0 has no descriptors (skipped).
 RELEASES_RAW = [
     {
-        "tag_name": "v0.1.1",
+        "tag_name": "v1.6.0",
         "prerelease": False,
-        "published_at": "2026-07-01T09:00:00Z",
-        "html_url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
-        "name": "Fix vflip regression",
-        "body": "notes",
+        "draft": False,
+        "published_at": "2026-07-22T10:00:00Z",
+        "html_url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.6.0",
+        "body": "Safe Wi-Fi OTA for E1004\n\nmore detail here",
+        "assets": [_asset("descriptor-seeed_reterminal_e1004.json"), _asset("firmware-e1004.bin")],
+    },
+    {
+        "tag_name": "v1.6.0-rc1",
+        "prerelease": True,
+        "draft": False,
+        "published_at": "2026-07-21T10:00:00Z",
+        "html_url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.6.0-rc1",
+        "body": "rc",
+        "assets": [_asset("descriptor-seeed_reterminal_e1004.json")],
+    },
+    {
+        "tag_name": "v1.5.0",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-07-19T10:00:00Z",
+        "html_url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.5.0",
+        "body": "Older",
         "assets": [
-            {
-                "name": "picpak-firmware-v0.1.1.bin",
-                "browser_download_url": "https://example/v0.1.1/picpak.bin",
-            }
+            _asset("descriptor-seeed_reterminal_e1004.json"),
+            _asset("descriptor-legacy_kind.json"),
         ],
     },
     {
-        "tag_name": "v0.2.0-rc.1",
-        "prerelease": True,
-        "published_at": "2026-07-05T09:00:00Z",
-        "html_url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.2.0-rc.1",
-        "name": "Prerelease",
-        "body": "notes",
-        "assets": [],
-    },
-    {
-        "tag_name": "v0.1.0",
+        "tag_name": "v1.4.0",
         "prerelease": False,
-        "published_at": "2026-06-01T09:00:00Z",
-        "html_url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.0",
-        "name": "First",
-        "body": "notes",
+        "draft": False,
+        "published_at": "2026-07-18T10:00:00Z",
+        "html_url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.4.0",
+        "body": "no assets",
         "assets": [],
     },
 ]
-
-SOURCE = {
-    "type": "github_releases",
-    "owner": "varanu5",
-    "repo": "picpak-tesserae-client",
-    "channel": "stable",
-}
 
 
 def _mock_client() -> httpx.Client:
@@ -63,106 +72,74 @@ def _mock_client() -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-# build_kind_cache -----------------------------------------------------------
+# build_cache ----------------------------------------------------------------
 
 
-def test_build_kind_cache_stable_filters_prereleases(settings):
+def test_build_cache_indexes_stable_releases_by_kind(settings):
     with _mock_client() as client:
-        entry = fw.build_kind_cache(client, settings, SOURCE)
-    assert entry["latest"]["version"] == "0.1.1"
-    assert entry["latest"]["notes_headline"] == "Fix vflip regression"
-    assert entry["latest"]["assets"] == [
-        {"name": "picpak-firmware-v0.1.1.bin", "download_url": "https://example/v0.1.1/picpak.bin"}
-    ]
-    # Prerelease excluded for a stable channel.
-    assert entry["versions"] == ["0.1.1", "0.1.0"]
+        cache = fw.build_cache(client, settings)
+    releases = cache["releases"]
+    # rc1 (prerelease) and v1.4.0 (no descriptors) are excluded.
+    assert [r["version"] for r in releases] == ["1.6.0", "1.5.0"]
+    latest = releases[0]
+    assert latest["notes_headline"] == "Safe Wi-Fi OTA for E1004"  # first body line
+    assert set(latest["kinds"]) == {"seeed_reterminal_e1004"}  # only descriptor assets
+    desc = latest["kinds"]["seeed_reterminal_e1004"]
+    assert desc["name"] == "descriptor-seeed_reterminal_e1004.json"
+    assert desc["content_type"] == "application/json"
 
 
-def test_build_kind_cache_empty_releases(settings):
-    def handler(request):
-        return httpx.Response(200, json=[])
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        assert fw.build_kind_cache(client, settings, SOURCE) is None
-
-
-def test_build_kind_cache_http_error(settings):
+def test_build_cache_http_error(settings):
     def handler(request):
         return httpx.Response(500, text="boom")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(httpx.HTTPStatusError):
-            fw.build_kind_cache(client, settings, SOURCE)
+            fw.build_cache(client, settings)
 
 
-# load_sources ---------------------------------------------------------------
+def test_poll_keeps_last_good_on_failure(settings, monkeypatch):
+    fw.write_cache(SEED_FIRMWARE_CACHE, settings.firmware_cache_path)
 
+    def boom(*a, **k):
+        raise httpx.ConnectError("github unreachable")
 
-def test_load_sources(settings):
-    sources = fw.load_sources(settings.firmware_sources_path)
-    assert "picpak_client" in sources
-    assert sources["picpak_client"]["owner"] == "varanu5"
-
-
-def test_load_sources_missing(tmp_path):
-    assert fw.load_sources(tmp_path / "nope.yaml") == {}
-
-
-# poll_and_cache: orchestration + stale fallback -----------------------------
-
-
-def test_poll_and_cache_updates_and_keeps_last_good(settings, monkeypatch):
-    # Seed a previous cache with old entries plus a kind no longer configured.
-    previous = {
-        "picpak_client": {"latest": {"version": "0.0.9", "assets": []}, "versions": ["0.0.9"]},
-        "esp32_client": {"latest": {"version": "1.0.0", "assets": []}, "versions": ["1.0.0"]},
-        "retired_client": {"latest": {"version": "9.9.9", "assets": []}, "versions": ["9.9.9"]},
-    }
-    settings.firmware_cache_path.write_text(json.dumps(previous), encoding="utf-8")
-
-    def fake_build(client, s, source):
-        if source["owner"] == "varanu5":  # picpak: succeeds with a fresh release
-            return {"latest": {"version": "0.1.1", "assets": []}, "versions": ["0.1.1"]}
-        raise httpx.ConnectError("esp32 source unreachable")  # esp32: fails
-
-    monkeypatch.setattr(fw, "build_kind_cache", fake_build)
-    cache = fw.poll_and_cache(settings)
-
-    assert cache["picpak_client"]["latest"]["version"] == "0.1.1"  # updated
-    assert cache["esp32_client"]["latest"]["version"] == "1.0.0"  # kept last known good
-    assert "retired_client" not in cache  # pruned: no longer in the config
+    monkeypatch.setattr(fw, "build_cache", boom)
+    with pytest.raises(httpx.ConnectError):
+        fw.poll_and_cache(settings)
+    assert fw.load_cache(settings.firmware_cache_path) == SEED_FIRMWARE_CACHE
 
 
 # resolve --------------------------------------------------------------------
 
 
-def test_resolve_behind():
-    out = fw.resolve(SEED_FIRMWARE_CACHE, "picpak_client", "0.1.0-dev")
-    assert out["kind"] == "picpak_client"
-    assert out["current"] == "0.1.0-dev"
-    assert out["latest"]["version"] == "0.1.1"
-    assert out["latest"]["assets"][0]["name"] == "picpak-firmware-v0.1.1.bin"
-    assert out["is_current"] is False
-    assert out["versions_behind"] == 1
+def test_resolve_newest_covering_release():
+    out = fw.resolve(SEED_FIRMWARE_CACHE, "seeed_reterminal_e1004")
+    latest = out["latest"]
+    assert latest["version"] == "1.6.0"
+    assert latest["url"].endswith("/v1.6.0")
+    assert latest["descriptor_url"].endswith("descriptor-seeed_reterminal_e1004.json")
+    assert latest["assets"] == [latest["assets"][0]]
+    assert latest["assets"][0]["name"] == "descriptor-seeed_reterminal_e1004.json"
+    assert "/v1.6.0/" in latest["descriptor_url"]  # newest release's descriptor
 
 
-def test_resolve_current():
-    out = fw.resolve(SEED_FIRMWARE_CACHE, "picpak_client", "0.1.1")
-    assert out["is_current"] is True
-    assert out["versions_behind"] == 0
-
-
-def test_resolve_no_current():
-    out = fw.resolve(SEED_FIRMWARE_CACHE, "esp32_client", None)
-    assert out["is_current"] is None
-    assert out["versions_behind"] is None
-    assert out["latest"]["assets"] == []
+def test_resolve_walks_back_to_older_release():
+    # legacy_kind only exists in v1.5.0.
+    out = fw.resolve(SEED_FIRMWARE_CACHE, "legacy_kind")
+    assert out["latest"]["version"] == "1.5.0"
 
 
 def test_resolve_unknown_kind_returns_none():
-    assert fw.resolve(SEED_FIRMWARE_CACHE, "does_not_exist", "1.0.0") is None
+    assert fw.resolve(SEED_FIRMWARE_CACHE, "no_such_kind") is None
 
 
-def test_resolve_unparseable_current():
-    out = fw.resolve(SEED_FIRMWARE_CACHE, "esp32_client", "not-a-version")
-    assert out["versions_behind"] is None
+def test_resolve_empty_cache_returns_none():
+    assert fw.resolve({"releases": []}, "seeed_reterminal_e1004") is None
+
+
+def test_strip_v_and_first_line():
+    assert fw._strip_v("v1.6.0") == "1.6.0"
+    assert fw._strip_v("1.6.0") == "1.6.0"
+    assert fw._first_line("line one\nline two") == "line one"
+    assert len(fw._first_line("x" * 200)) == 100

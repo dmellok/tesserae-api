@@ -153,6 +153,20 @@ def _summarise_heartbeats(url: str) -> None:
     if not fw_rows:
         print("  (none)")
 
+    _print_header("Firmware checks by kind (30d, aggregate counts)")
+    fc_totals = collector.firmware_check_totals(url, 30)
+    for kind, n in fc_totals.items():
+        print(f"  {str(kind):<28} {n}")
+    if not fc_totals:
+        print("  (none)")
+
+    _print_header("Firmware checks by kind + reported version (30d)")
+    fc_versions = collector.firmware_check_versions(url, 30)
+    for kind, version, n in fc_versions:
+        print(f"  {str(kind):<24} {str(version):<14} {n}")
+    if not fc_versions:
+        print("  (none)")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print a summary of Tesserae aggregate stats.")

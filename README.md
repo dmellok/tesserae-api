@@ -48,10 +48,9 @@ src/tesserae_api/
   routes/version.py        GET /version/latest
   routes/firmware.py       GET /firmware/{kind}/latest
   cache/github_releases.py version polling, cache read/write, channel resolution
-  cache/firmware.py        per-kind firmware polling, cache, resolution
+  cache/firmware.py        firmware release polling by descriptor asset, resolution
   stats/collector.py       aggregate writes (SQLAlchemy: SQLite dev, Postgres prod)
   stats/geo.py             MaxMind GeoLite2 lookup
-firmware_sources.yaml      device kind -> GitHub release source map
 scripts/
   poll_github.py           run by the systemd timer (version + firmware)
   dump_stats.py            maintainer's stats reader
@@ -111,42 +110,41 @@ are `null`. If the cache has not been populated yet the endpoint returns `503` w
 
 ### `GET /firmware/{kind}/latest`
 
-Per-device-kind firmware update check. `kind` is a device slug (`esp32_client`, `pi_bin_client`,
-`picpak_client`, etc.) defined in `firmware_sources.yaml`. Each kind maps to a GitHub repository
-whose latest stable release is polled and cached, mirroring `/version/latest`.
+Latest published firmware for a device kind, so a Tesserae server can show an "update available"
+badge. The source of truth is the newest published (non-draft, non-prerelease) release of the
+firmware repo (`dmellok/tesserae-device-firmware`) that carries a `descriptor-<kind>.json` asset;
+if the newest release does not cover the kind, older releases are walked until one does. Kinds are
+therefore discovered from the release assets, not a config file. Releases are polled and cached to
+disk (authenticated with a GitHub token).
 
-Query parameters:
-
-| Param     | Required | Notes                                                                 |
-| --------- | -------- | --------------------------------------------------------------------- |
-| `current` | no       | Caller's running firmware version. Adds `is_current` and `versions_behind`. |
-| `install` | no       | Client-generated UUID v4, stored opaquely against the stats record.   |
-
-Response headers: `Cache-Control: public, max-age=300` and `Access-Control-Allow-Origin: *`.
+Query parameter: `current` (optional) is the caller's running firmware version, recorded for the
+version distribution; it does not change the response. Response header:
+`Cache-Control: public, max-age=300`.
 
 ```json
 {
-  "kind": "picpak_client",
-  "current": "0.1.0-dev",
   "latest": {
-    "version": "0.1.1",
-    "released_at": "2026-07-01T09:00:00Z",
-    "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.1.1",
-    "notes_headline": "Fix vflip regression",
+    "version": "1.6.0",
+    "released_at": "2026-07-22T21:37:48Z",
+    "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.6.0",
+    "notes_headline": "Safe Wi-Fi OTA for E1004",
     "assets": [
-      { "name": "picpak-firmware-v0.1.1.bin", "download_url": "https://github.com/..." }
-    ]
-  },
-  "is_current": false,
-  "versions_behind": 1
+      { "name": "descriptor-seeed_reterminal_e1004.json", "url": "https://.../descriptor-seeed_reterminal_e1004.json", "size": 611, "content_type": "application/json" }
+    ],
+    "descriptor_url": "https://.../descriptor-seeed_reterminal_e1004.json"
+  }
 }
 ```
 
-`assets` is empty when the release attached no binaries; the API links to GitHub's asset URLs and
-does not proxy the binaries. Unknown `kind` returns `404`. A configured kind with no cached release
-yet (for example a source repo that has not cut a release) returns `503`. Adding a new device kind
-is a `firmware_sources.yaml` edit plus a redeploy, no code change. Only the `stable` channel is
-implemented; `edge`/`main` are placeholders in the config schema.
+`version` is the release tag with any leading `v` stripped (plain semver). `descriptor_url` is the
+matching descriptor asset (for one-click import). An unknown kind, or one no release covers, returns
+`404` with an empty body (the client treats any non-2xx as "no data"), so 404 is the normal "nothing
+to report" signal, never a 500. Adding a new device kind is a release with its
+`descriptor-<kind>.json` asset, no code or config change here.
+
+Telemetry is aggregate only: counts per `(day, kind, reported version, coarse country)` in
+`firmware_check_stats`. The caller IP is used for the country lookup then discarded; no IP, no
+install id, and no per-request row is retained.
 
 ### `POST /widgets/install`
 
@@ -242,6 +240,11 @@ Heartbeats use `heartbeats` (keyed `UNIQUE(day, install_uuid)`, upserted) and `h
 (`UNIQUE(day, install_uuid, kind)`, with a `fw_version` column for the reported firmware version per
 kind). These store a `day` (a `Date`), never a timestamp, and are written by `POST /heartbeat`. The
 `hits` and `widget_installs` tables are untouched by the heartbeat path.
+
+Firmware checks (`GET /firmware/{kind}/latest`) write only to `firmware_check_stats`, an
+aggregate-only counter keyed `UNIQUE(day, kind, version, country)` with a `count` column. There is
+no per-request row, no IP, and no install id: the endpoint upserts a count and stores a coarse
+country only.
 
 What is deliberately **not** collected, ever:
 
