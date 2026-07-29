@@ -123,6 +123,7 @@ def test_post_heartbeat_204(client, seeded_settings):
             "deploy": "docker",
             "transport": "rest",
             "devices": "2-3",
+            "companion": "4-9",
             "device_kinds": ["pimoroni_inky_4"],
             "ha": True,
         },
@@ -133,6 +134,8 @@ def test_post_heartbeat_204(client, seeded_settings):
     assert len(rows) == 1
     assert rows[0]["install_uuid"] == UUID_A
     assert rows[0]["deploy"] == "docker"
+    assert rows[0]["devices"] == "2-3"
+    assert rows[0]["companion"] == "4-9"
     assert bool(rows[0]["ha"]) is True
 
 
@@ -146,6 +149,7 @@ def test_post_heartbeat_enum_coercion(client, seeded_settings):
             "deploy": "snap",
             "transport": "carrier-pigeon",
             "devices": "lots",
+            "companion": "heaps",
             "py": "2.7",
             "channel": "beta",
         },
@@ -156,8 +160,37 @@ def test_post_heartbeat_enum_coercion(client, seeded_settings):
     assert row["deploy"] == "unknown"
     assert row["transport"] == "unknown"
     assert row["devices"] == "unknown"
+    assert row["companion"] == "unknown"
     assert row["py"] == "other"
     assert row["channel"] == "unknown"
+
+
+def test_post_heartbeat_companion_absent_is_null(client, seeded_settings):
+    # An older server that omits companion still succeeds; the column is NULL.
+    resp = client.post("/heartbeat", json={"install": UUID_A, "devices": "1"})
+    assert resp.status_code == 204
+    row = _rows(seeded_settings.stats_db_path, "heartbeats")[0]
+    assert row["companion"] is None
+    assert row["devices"] == "1"
+
+
+def test_companion_installs_metric(settings):
+    collector.init_db(settings.resolved_database_url)
+    url = settings.resolved_database_url
+    day = DAY
+    collector.record_heartbeat(url, install_uuid=UUID_A, companion="2-3", day=day)
+    collector.record_heartbeat(url, install_uuid=UUID_B, companion="0", day=day)  # has none
+    collector.record_heartbeat(
+        url, install_uuid="22222222-2222-4222-8222-222222222222", companion=None, day=day
+    )  # did not report
+    # Only the install with a present, non-"0" companion bucket counts.
+    assert collector.heartbeat_companion_installs(url, days=3650) == 1
+    # Distribution groups by the bucket, including the not-reported (NULL) group.
+    assert collector.heartbeat_distribution(url, "companion", days=3650) == {
+        "2-3": 1,
+        "0": 1,
+        None: 1,
+    }
 
 
 def test_post_heartbeat_device_kinds_sanitised(client, seeded_settings):

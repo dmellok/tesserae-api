@@ -87,6 +87,7 @@ _HEARTBEAT_FIELDS = (
     "deploy",
     "transport",
     "devices",
+    "companion",
     "ha",
     "country",
     "region",
@@ -104,7 +105,8 @@ heartbeats = Table(
     Column("py", String),
     Column("deploy", String),
     Column("transport", String),
-    Column("devices", String),
+    Column("devices", String),  # bucketed count of paired devices
+    Column("companion", String),  # bucketed count of paired companion apps
     Column("ha", Boolean),
     Column("country", String),
     Column("region", String),
@@ -143,6 +145,7 @@ firmware_check_stats = Table(
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "hits": {"kind": "VARCHAR"},
     "heartbeat_kinds": {"fw_version": "VARCHAR"},
+    "heartbeats": {"companion": "VARCHAR"},
 }
 
 # One engine per URL, reused across requests (SQLAlchemy pools connections).
@@ -265,6 +268,7 @@ def record_heartbeat(
     deploy: str | None = None,
     transport: str | None = None,
     devices: str | None = None,
+    companion: str | None = None,
     ha: bool | None = None,
     country: str | None = None,
     region: str | None = None,
@@ -289,6 +293,7 @@ def record_heartbeat(
         "deploy": deploy,
         "transport": transport,
         "devices": devices,
+        "companion": companion,
         "ha": ha,
         "country": country,
         "region": region,
@@ -323,6 +328,20 @@ def heartbeat_active_installs(url: str, days: int = 30) -> int:
         select(func.count(func.distinct(heartbeats.c.install_uuid)))
         .where(heartbeats.c.install_uuid.is_not(None))
         .where(heartbeats.c.day >= _since(days))
+    )
+    with engine.connect() as conn:
+        return conn.execute(stmt).scalar_one()
+
+
+def heartbeat_companion_installs(url: str, days: int = 30) -> int:
+    """Distinct installs reporting a paired companion app (companion present, != '0')."""
+    engine = get_engine(url)
+    stmt = (
+        select(func.count(func.distinct(heartbeats.c.install_uuid)))
+        .where(heartbeats.c.install_uuid.is_not(None))
+        .where(heartbeats.c.day >= _since(days))
+        .where(heartbeats.c.companion.is_not(None))
+        .where(heartbeats.c.companion != "0")
     )
     with engine.connect() as conn:
         return conn.execute(stmt).scalar_one()

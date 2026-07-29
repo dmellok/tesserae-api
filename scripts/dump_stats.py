@@ -131,6 +131,8 @@ def _summarise_heartbeats(url: str) -> None:
         ("Heartbeat OS mix (30d)", "os"),
         ("Heartbeat arch mix (30d)", "arch"),
         ("Heartbeat transport mix (30d)", "transport"),
+        ("Heartbeat devices bucket mix (30d)", "devices"),
+        ("Heartbeat companion bucket mix (30d)", "companion"),
     ):
         _print_header(title)
         rows = collector.heartbeat_distribution(url, column, 30)
@@ -138,6 +140,9 @@ def _summarise_heartbeats(url: str) -> None:
             print(f"  {str(name):<20} {n}")
         if not rows:
             print("  (none)")
+
+    _print_header("Installs with a paired companion app (30d)")
+    print(f"  {collector.heartbeat_companion_installs(url, 30)}")
 
     _print_header("Heartbeat per-kind active installs (30d)")
     kinds = collector.heartbeat_kind_active_installs(url, 30)

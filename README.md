@@ -181,7 +181,7 @@ environment. JSON body (all fields optional):
 {
   "install": "<uuid>", "version": "0.94.2", "channel": "stable",
   "os": "linux", "arch": "arm64", "py": "3.12", "deploy": "docker",
-  "transport": "rest", "devices": "2-3",
+  "transport": "rest", "devices": "2-3", "companion": "2-3",
   "device_kinds": [
     {"kind": "pimoroni_inky_4", "fw_version": "1.3.1"},
     {"kind": "waveshare_spectra6_13", "fw_version": "2.0.0"}
@@ -204,7 +204,9 @@ heartbeat:
   descriptive columns reflect the latest ping), so restarts do not inflate counts.
 
 Enum fields are coerced to their allowed sets rather than rejected: an unrecognised value becomes
-`other` (os/arch/py) or `unknown` (channel/deploy/transport/devices). `device_kinds` keeps only
+`other` (os/arch/py) or `unknown` (channel/deploy/transport/devices/companion). `devices` and
+`companion` share the bucket vocabulary `{0, 1, 2-3, 4-9, 10+}` (companion is a bucketed count of
+paired companion apps). `device_kinds` keeps only
 `^[a-z0-9_-]{1,64}$` slugs, deduped and capped at 32. Same geo posture as the other endpoints: the
 IP is used for a coarse country/region lookup then discarded. Install-level heartbeat rows are not
 exposed publicly; the maintainer reads aggregates via `scripts/dump_stats.py`.

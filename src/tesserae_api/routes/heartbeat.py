@@ -28,7 +28,8 @@ _OS = {"linux", "macos", "windows", "other"}
 _ARCH = {"x86_64", "arm64", "arm", "other"}
 _DEPLOY = {"docker", "ha_addon", "pip", "lxc", "source", "unknown"}
 _TRANSPORT = {"mqtt", "rest", "both", "none", "unknown"}
-_DEVICES = {"0", "1", "2-3", "4-9", "10+"}
+# Shared bucket vocabulary for count fields (devices, companion).
+_BUCKETS = {"0", "1", "2-3", "4-9", "10+"}
 _PY_RE = re.compile(r"^3\.\d{1,2}$")
 _KIND_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
 _MAX_KINDS = 32
@@ -74,11 +75,12 @@ def _py(value: Any) -> str | None:
     return text if _PY_RE.match(text) else "other"
 
 
-def _devices(value: Any) -> str | None:
+def _bucket(value: Any) -> str | None:
+    """Coerce a count field to the bucket vocabulary; absent stays None."""
     text = _str(value)
     if text is None:
         return None
-    return text if text in _DEVICES else "unknown"
+    return text if text in _BUCKETS else "unknown"
 
 
 def _ha(value: Any) -> bool | None:
@@ -153,7 +155,8 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
             py=_py(data.get("py")),
             deploy=_enum(data.get("deploy"), _DEPLOY, "unknown"),
             transport=_enum(data.get("transport"), _TRANSPORT, "unknown"),
-            devices=_devices(data.get("devices")),
+            devices=_bucket(data.get("devices")),
+            companion=_bucket(data.get("companion")),
             ha=_ha(data.get("ha")),
             country=country,
             region=region,
