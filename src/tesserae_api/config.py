@@ -69,7 +69,10 @@ class Settings(BaseSettings):
 
     # Submission caps (server-side; Caddy adds the transport-level limits).
     template_max_doc_bytes: int = 262_144
-    template_max_png_bytes: int = 409_600
+    # Previews double as the reviewer's view of a submission in Discord, so
+    # the cap is generous enough to keep them readable; the app downsamples
+    # to ~1200px on the long edge before submitting.
+    template_max_png_bytes: int = 1_000_000
     template_max_pending_per_install: int = 3
     template_daily_submissions_per_install: int = 10
 

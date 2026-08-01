@@ -9,10 +9,11 @@ api.tesserae.ink {
 	encode zstd gzip
 
 	# Global body cap: the largest legitimate request is a template submission
-	# (doc ≤256KB + preview PNG ≤400KB, base64), comfortably under 2MB. Every
-	# other endpoint takes tiny bodies.
+	# (doc ≤256KB + preview PNG ≤1MB, which base64 inflates to ~1.4MB). Every
+	# other endpoint takes tiny bodies, and submissions are rate-limited to
+	# 5/hour per IP below, so the headroom here isn't a DoS lever.
 	request_body {
-		max_size 2MB
+		max_size 4MB
 	}
 
 	# Per-IP rate limit: 60 requests/minute, keyed on the client address, plus
