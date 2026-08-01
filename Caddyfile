@@ -8,12 +8,30 @@
 api.tesserae.ink {
 	encode zstd gzip
 
-	# Per-IP rate limit: 60 requests/minute, keyed on the client address.
+	# Global body cap: the largest legitimate request is a template submission
+	# (doc ≤256KB + preview PNG ≤400KB, base64), comfortably under 2MB. Every
+	# other endpoint takes tiny bodies.
+	request_body {
+		max_size 2MB
+	}
+
+	# Per-IP rate limit: 60 requests/minute, keyed on the client address, plus
+	# a tighter zone on template submissions (rare, human-scale events) so a
+	# scripted flood can't bury the review channel.
 	rate_limit {
 		zone perip {
 			key {remote_host}
 			events 60
 			window 1m
+		}
+		zone tpl_submit {
+			match {
+				method POST
+				path /templates/submit
+			}
+			key {remote_host}
+			events 5
+			window 1h
 		}
 	}
 

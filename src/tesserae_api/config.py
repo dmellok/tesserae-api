@@ -50,6 +50,29 @@ class Settings(BaseSettings):
     # Number of recent releases / commits to retain for "behind" calculations.
     history_limit: int = 100
 
+    # -- template marketplace ------------------------------------------
+    # Discord review channel: submissions post as embeds with Approve/Reject
+    # buttons via the bot token (plain webhooks can't carry components), and
+    # button presses come back to POST /discord/interactions, verified against
+    # the application public key. Reviewer ids gate who may press the buttons.
+    discord_public_key: str = ""  # hex, from the Discord developer portal
+    discord_bot_token: str | None = None
+    discord_channel_id: str | None = None
+    discord_reviewer_ids: str = ""  # comma-separated Discord user ids
+
+    # Public base URL used to build preview links in Discord embeds.
+    public_base_url: str = "https://api.tesserae.ink"
+
+    # HMAC secret for seeded author pseudonyms. Empty = auto-generated and
+    # persisted at data_dir/author_secret on first use.
+    author_secret: str = ""
+
+    # Submission caps (server-side; Caddy adds the transport-level limits).
+    template_max_doc_bytes: int = 262_144
+    template_max_png_bytes: int = 409_600
+    template_max_pending_per_install: int = 3
+    template_daily_submissions_per_install: int = 10
+
     @property
     def version_cache_path(self) -> Path:
         return self.data_dir / "version_cache.json"
@@ -80,6 +103,10 @@ class Settings(BaseSettings):
     @property
     def blocked_version_prefixes(self) -> tuple[str, ...]:
         return tuple(p.strip() for p in self.blocked_versions.split(",") if p.strip())
+
+    @property
+    def discord_reviewer_id_set(self) -> frozenset[str]:
+        return frozenset(p.strip() for p in self.discord_reviewer_ids.split(",") if p.strip())
 
 
 @lru_cache

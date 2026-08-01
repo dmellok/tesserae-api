@@ -1,6 +1,6 @@
 [project]
 name = "tesserae-api"
-version = "0.9.0"
+version = "0.10.0"
 description = "Public JSON API server for Tesserae widgets (api.tesserae.ink)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,6 +16,7 @@ dependencies = [
     "packaging>=24.1",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
+    "pynacl>=1.5",
 ]
 
 [project.urls]

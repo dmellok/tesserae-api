@@ -10,8 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from tesserae_api.cache import firmware, github_releases
 from tesserae_api.config import get_settings
+from tesserae_api.routes import discord as discord_routes
 from tesserae_api.routes import firmware as firmware_routes
-from tesserae_api.routes import heartbeat, version, widgets
+from tesserae_api.routes import heartbeat, templates, version, widgets
 from tesserae_api.stats import collector, geo
 
 log = logging.getLogger("tesserae_api")
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Tesserae API",
-        version="0.9.0",
+        version="0.10.0",
         description="Public JSON API for Tesserae widgets.",
         lifespan=lifespan,
     )
@@ -61,6 +62,8 @@ def create_app() -> FastAPI:
     app.include_router(firmware_routes.router)
     app.include_router(widgets.router)
     app.include_router(heartbeat.router)
+    app.include_router(templates.router)
+    app.include_router(discord_routes.router)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:

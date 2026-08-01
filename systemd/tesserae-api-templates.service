@@ -1,0 +1,11 @@
+[Unit]
+Description=Announce unnotified pending Tesserae template submissions to Discord
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Runs inside the already-running container so it reaches the same database.
+ExecStart=/usr/bin/docker exec tesserae-api python -m scripts.notify_pending
+# A failed announce is non-fatal: the next run retries the same rows.
+SuccessExitStatus=0 1

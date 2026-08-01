@@ -203,3 +203,29 @@ GHCR, deploy over SSH, and smoke-test `https://api.tesserae.ink/version/latest`.
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+## Template marketplace: Discord review channel
+
+One-time setup for the submissions review flow (`/templates/*` +
+`/discord/interactions`):
+
+1. Create a Discord application (discord.com/developers) with a bot; invite the
+   bot to the guild with Send Messages permission in a PRIVATE review channel.
+2. Add to `/opt/tesserae-api/.env` (chmod 600):
+   `TESSERAE_DISCORD_PUBLIC_KEY` (application public key, hex),
+   `TESSERAE_DISCORD_BOT_TOKEN`, `TESSERAE_DISCORD_CHANNEL_ID`,
+   `TESSERAE_DISCORD_REVIEWER_IDS` (comma-separated Discord user ids).
+3. Deploy, THEN set the application's "Interactions Endpoint URL" to
+   `https://api.tesserae.ink/discord/interactions`. Discord verifies the URL
+   with a signed PING plus deliberately bad signatures (the endpoint 401s
+   those), so it must be live first.
+4. Enable the repair timer:
+   `sudo cp systemd/tesserae-api-templates.{service,timer} /etc/systemd/system/`
+   then `sudo systemctl enable --now tesserae-api-templates.timer`.
+5. Caddy: the updated Caddyfile adds a global 2MB body cap and a 5/h/IP zone on
+   POST /templates/submit; `sudo systemctl reload caddy` after copying it.
+
+Moderation fallback when Discord is down:
+`docker exec tesserae-api python -m scripts.moderate list --status pending`
+then `approve <id>` / `reject <id> --reason "..."`. Sponsor perks:
+`... scripts.moderate sponsor <install_uuid> --name "Display Name"`.
