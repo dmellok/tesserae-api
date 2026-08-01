@@ -50,6 +50,13 @@ services:
       TESSERAE_DATABASE_URL: postgresql+psycopg://tesserae:${POSTGRES_PASSWORD}@postgres:5432/tesserae
       # Comma-separated version prefixes to block from recording (set in .env).
       TESSERAE_BLOCKED_VERSIONS: ${TESSERAE_BLOCKED_VERSIONS:-}
+      # Template marketplace: Discord review channel + author pseudonym secret
+      # (set in .env; empty = feature endpoints refuse/skip gracefully).
+      TESSERAE_DISCORD_PUBLIC_KEY: ${TESSERAE_DISCORD_PUBLIC_KEY:-}
+      TESSERAE_DISCORD_BOT_TOKEN: ${TESSERAE_DISCORD_BOT_TOKEN:-}
+      TESSERAE_DISCORD_CHANNEL_ID: ${TESSERAE_DISCORD_CHANNEL_ID:-}
+      TESSERAE_DISCORD_REVIEWER_IDS: ${TESSERAE_DISCORD_REVIEWER_IDS:-}
+      TESSERAE_AUTHOR_SECRET: ${TESSERAE_AUTHOR_SECRET:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s
