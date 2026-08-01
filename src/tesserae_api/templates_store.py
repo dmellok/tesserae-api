@@ -96,6 +96,27 @@ template_installs = Table(
     Index("idx_tpl_installs_install", "install_uuid"),
 )
 
+template_reports = Table(
+    "template_reports",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("submission_id", String, nullable=False),
+    Column("slug", String, nullable=False),
+    Column("reason", Text),
+    Column("install_uuid", String),
+    # True when the reporting install is the one that submitted the template,
+    # i.e. an author asking for their own work to come down. Advisory only:
+    # install ids are forgeable, so it flags the embed rather than auto-acting.
+    Column("by_submitter", Boolean, nullable=False, default=False),
+    Column("status", String, nullable=False),  # open | actioned | dismissed
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("handled_at", DateTime(timezone=True)),
+    Column("handled_by", String),
+    Column("discord_message_id", String),
+    Index("idx_tpl_reports_status", "status"),
+    Index("idx_tpl_reports_submission", "submission_id"),
+)
+
 template_authors = Table(
     "template_authors",
     metadata,
@@ -327,6 +348,89 @@ def daily_count(url: str, install_uuid: str) -> int:
     stmt = select(func.count()).where(
         template_submissions.c.install_uuid == install_uuid,
         template_submissions.c.created_at >= since,
+    )
+    with engine.connect() as conn:
+        return int(conn.execute(stmt).scalar_one())
+
+
+# -- reports (takedown requests) -----------------------------------------
+
+
+def create_report(url: str, **fields: Any) -> None:
+    """Record one takedown request. Caller builds the id and classification."""
+    engine = get_engine(url)
+    with engine.begin() as conn:
+        conn.execute(insert(template_reports).values(created_at=_now(), status="open", **fields))
+
+
+def get_report(url: str, report_id: str) -> dict[str, Any] | None:
+    engine = get_engine(url)
+    stmt = select(template_reports).where(template_reports.c.id == report_id)
+    with engine.connect() as conn:
+        row = conn.execute(stmt).mappings().first()
+    return dict(row) if row else None
+
+
+def set_report_status(url: str, report_id: str, status: str, *, handled_by: str) -> bool:
+    """Close a report as ``actioned`` (the template was revoked) or
+    ``dismissed``. Returns False for an unknown id."""
+    if status not in ("open", "actioned", "dismissed"):
+        raise ValueError(f"unknown report status: {status}")
+    engine = get_engine(url)
+    with engine.begin() as conn:
+        result = conn.execute(
+            update(template_reports)
+            .where(template_reports.c.id == report_id)
+            .values(status=status, handled_at=_now(), handled_by=handled_by)
+        )
+    return result.rowcount > 0
+
+
+def close_reports_for_submission(url: str, submission_id: str, *, handled_by: str) -> None:
+    """Mark every open report on a submission actioned, so revoking from the
+    original review message also clears any reports pointing at it."""
+    engine = get_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            update(template_reports)
+            .where(
+                template_reports.c.submission_id == submission_id,
+                template_reports.c.status == "open",
+            )
+            .values(status="actioned", handled_at=_now(), handled_by=handled_by)
+        )
+
+
+def set_report_discord_message(url: str, report_id: str, message_id: str) -> None:
+    engine = get_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            update(template_reports)
+            .where(template_reports.c.id == report_id)
+            .values(discord_message_id=message_id)
+        )
+
+
+def open_reports_without_discord_message(url: str) -> list[dict[str, Any]]:
+    """Open reports the submit-time Discord post missed (repair timer input)."""
+    engine = get_engine(url)
+    stmt = select(template_reports).where(
+        template_reports.c.status == "open",
+        template_reports.c.discord_message_id.is_(None),
+    )
+    with engine.connect() as conn:
+        return [dict(row) for row in conn.execute(stmt).mappings()]
+
+
+def daily_report_count(url: str, install_uuid: str | None) -> int:
+    """Reports filed by an install in the last day (spam guard)."""
+    if not install_uuid or _is_test_install(install_uuid):
+        return 0
+    engine = get_engine(url)
+    since = _now() - timedelta(days=1)
+    stmt = select(func.count()).where(
+        template_reports.c.install_uuid == install_uuid,
+        template_reports.c.created_at >= since,
     )
     with engine.connect() as conn:
         return int(conn.execute(stmt).scalar_one())

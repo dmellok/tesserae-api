@@ -112,6 +112,74 @@ def outcome_components(submission_id: str, outcome: str) -> list[dict[str, Any]]
     ]
 
 
+def report_embed(
+    settings: Settings, report: dict[str, Any], submission: dict[str, Any]
+) -> dict[str, Any]:
+    """The takedown-request embed. Leads with who asked and why; the template's
+    own preview rides along so the decision needs no other context."""
+    by = (
+        "the install that submitted it (author asking for their own takedown)"
+        if report.get("by_submitter")
+        else "a user of the catalog"
+    )
+    return {
+        "title": f"Takedown requested: {submission.get('title', '?')}",
+        "description": (report.get("reason") or "_no reason given_")[:1000],
+        "color": 0xB8860B,
+        "fields": [
+            {"name": "Reported by", "value": by},
+            {"name": "Template", "value": str(submission.get("slug") or "?"), "inline": True},
+            {"name": "Status", "value": str(submission.get("status") or "?"), "inline": True},
+        ],
+        "image": {
+            "url": f"{settings.public_base_url}/templates/preview/{submission.get('id')}.png"
+        },
+        "footer": {"text": f"report {report.get('id')} · submission {submission.get('id')}"},
+    }
+
+
+def report_components(report_id: str, submission_id: str) -> list[dict[str, Any]]:
+    """Take it down, or dismiss the report and leave the template up."""
+    return [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": _STYLE_DANGER,
+                    "label": "Take down",
+                    "custom_id": f"tpl:revoke:{submission_id}",
+                },
+                {
+                    "type": 2,
+                    "style": _STYLE_SECONDARY,
+                    "label": "Dismiss report",
+                    "custom_id": f"tpl:dismiss:{report_id}",
+                },
+            ],
+        }
+    ]
+
+
+def post_report_message(
+    settings: Settings, report: dict[str, Any], submission: dict[str, Any]
+) -> str | None:
+    """Post a takedown request to the review channel; returns the message id."""
+    if not settings.discord_bot_token or not settings.discord_channel_id:
+        return None
+    response = httpx.post(
+        f"{_API}/channels/{settings.discord_channel_id}/messages",
+        headers={"Authorization": f"Bot {settings.discord_bot_token}"},
+        json={
+            "embeds": [report_embed(settings, report, submission)],
+            "components": report_components(str(report.get("id")), str(submission.get("id"))),
+        },
+        timeout=5.0,
+    )
+    response.raise_for_status()
+    return str(response.json().get("id"))
+
+
 def post_submission_message(settings: Settings, row: dict[str, Any]) -> str | None:
     """Post the review message; returns the Discord message id (stored so the
     repair timer knows the row was announced). Raises on transport errors; the

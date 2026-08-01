@@ -225,6 +225,10 @@ One-time setup for the submissions review flow (`/templates/*` +
 5. Caddy: the updated Caddyfile adds a global 2MB body cap and a 5/h/IP zone on
    POST /templates/submit; `sudo systemctl reload caddy` after copying it.
 
+Takedown requests from the app post to the same channel with Take down /
+Dismiss buttons; a request from the install that submitted the template is
+labelled as such in the embed (advisory: install ids are forgeable).
+
 Moderation fallback when Discord is down:
 `docker exec tesserae-api python -m scripts.moderate list --status pending`
 then `approve <id>` / `reject <id> --reason "..."`. Sponsor perks:

@@ -171,3 +171,49 @@ def test_unknown_submission_and_bad_custom_id(discord_client_fixture, keypair):
     assert resp.json()["type"] == 4  # ephemeral notice
     resp = _signed_post(discord_client_fixture, keypair, _component("something:else"))
     assert resp.json()["type"] == 4
+
+
+def test_dismiss_report_leaves_template_up(discord_client_fixture, keypair, seeded_settings):
+    """A takedown request can be dismissed from its own message; the template
+    stays approved and the report closes."""
+    import uuid as _uuid
+
+    url = seeded_settings.resolved_database_url
+    sub = _pending_submission(discord_client_fixture)
+    templates_store.set_status(url, sub["id"], "approved", reviewed_by=_REVIEWER)
+    reported = discord_client_fixture.post(
+        f"/templates/{sub['slug']}/report",
+        json={"reason": "not to my taste", "install": str(_uuid.uuid4())},
+    ).json()
+
+    resp = _signed_post(
+        discord_client_fixture, keypair, _component(f"tpl:dismiss:{reported['id']}")
+    )
+    body = resp.json()
+    assert body["type"] == 7 and body["data"]["components"] == []
+    assert "dismissed" in body["data"]["embeds"][0]["title"].lower()
+    assert templates_store.get_report(url, reported["id"])["status"] == "dismissed"
+    assert templates_store.get_submission(url, sub["id"])["status"] == "approved"
+
+
+def test_take_down_from_report_revokes_and_closes(discord_client_fixture, keypair, seeded_settings):
+    import uuid as _uuid
+
+    url = seeded_settings.resolved_database_url
+    sub = _pending_submission(discord_client_fixture)
+    templates_store.set_status(url, sub["id"], "approved", reviewed_by=_REVIEWER)
+    reported = discord_client_fixture.post(
+        f"/templates/{sub['slug']}/report",
+        json={"reason": "contains a private address", "install": str(_uuid.uuid4())},
+    ).json()
+
+    # The report's "Take down" button carries the submission's revoke id.
+    resp = _signed_post(discord_client_fixture, keypair, _component(f"tpl:revoke:{sub['id']}"))
+    assert resp.json()["type"] == 7
+    assert templates_store.get_submission(url, sub["id"])["status"] == "revoked"
+    assert templates_store.get_report(url, reported["id"])["status"] == "actioned"
+
+
+def test_dismiss_unknown_report(discord_client_fixture, keypair):
+    resp = _signed_post(discord_client_fixture, keypair, _component("tpl:dismiss:nope"))
+    assert resp.json()["type"] == 4  # ephemeral notice

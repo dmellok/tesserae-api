@@ -100,8 +100,35 @@ async def interactions(request: Request) -> JSONResponse:
     parts = custom_id.split(":")
     if len(parts) != 3 or parts[0] != "tpl":
         return _ephemeral("Unrecognised interaction.")
-    action, submission_id = parts[1], parts[2]
+    action, target_id = parts[1], parts[2]
     url = settings.resolved_database_url
+
+    # "dismiss" addresses a report row; every other action addresses a
+    # submission. Resolve accordingly before the shared handling below.
+    if action == "dismiss":
+        report = templates_store.get_report(url, target_id)
+        if report is None:
+            return _ephemeral(f"Unknown report {target_id}.")
+        submission = templates_store.get_submission(url, str(report["submission_id"])) or {}
+        templates_store.set_report_status(url, target_id, "dismissed", handled_by=actor)
+        return JSONResponse(
+            {
+                "type": _UPDATE_MESSAGE,
+                "data": {
+                    "embeds": [
+                        {
+                            "title": f"Report dismissed: {submission.get('title', '?')}",
+                            "description": f"Dismissed by <@{actor}>; the template stays up.",
+                            "color": 0x777777,
+                            "footer": {"text": f"report {target_id}"},
+                        }
+                    ],
+                    "components": [],
+                },
+            }
+        )
+
+    submission_id = target_id
     row = templates_store.get_submission(url, submission_id)
     if row is None:
         return _ephemeral(f"Unknown submission {submission_id}.")
@@ -112,6 +139,9 @@ async def interactions(request: Request) -> JSONResponse:
             return _update_message(row, "approved", actor)
         if action == "revoke":
             templates_store.set_status(url, submission_id, "revoked", reviewed_by=actor)
+            # Clear any open reports on it: acting from either message (the
+            # original review post or a takedown request) settles both.
+            templates_store.close_reports_for_submission(url, submission_id, handled_by=actor)
             return _update_message(row, "revoked", actor)
         if action == "reject":
             return JSONResponse(

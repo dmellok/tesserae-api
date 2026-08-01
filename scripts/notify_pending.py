@@ -39,8 +39,23 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - keep going; next timer run retries
             log.error("failed to announce %s: %s", row["id"], exc)
             failures += 1
-    if not rows:
-        log.info("no unannounced pending submissions")
+    # Same repair for takedown requests that missed their post.
+    reports = templates_store.open_reports_without_discord_message(url)
+    for report in reports:
+        submission = templates_store.get_submission(url, str(report["submission_id"]))
+        if submission is None:
+            continue
+        try:
+            message_id = discord_client.post_report_message(settings, report, submission)
+            if message_id:
+                templates_store.set_report_discord_message(url, str(report["id"]), message_id)
+                log.info("announced report %s (%s)", report["id"], report["slug"])
+        except Exception as exc:  # noqa: BLE001 - keep going; next run retries
+            log.error("failed to announce report %s: %s", report["id"], exc)
+            failures += 1
+
+    if not rows and not reports:
+        log.info("no unannounced pending submissions or reports")
     return 1 if failures else 0
 
 

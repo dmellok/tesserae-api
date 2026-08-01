@@ -225,3 +225,79 @@ def test_lint_report_stored_for_reviewer(client, seeded_settings):
     lint = json.loads(row["lint"])
     assert lint["errors"] == []
     assert any(w["rule"] == "url-query-secret" for w in lint["warnings"])
+
+
+# -- takedown reports ----------------------------------------------------
+
+
+def _approved(client, seeded_settings, install=None):
+    submitted = _submit(client, install=install).json()
+    templates_store.set_status(
+        seeded_settings.resolved_database_url, submitted["id"], "approved", reviewed_by="111"
+    )
+    return submitted
+
+
+def test_report_records_and_flags_self_reports(client, seeded_settings):
+    url = seeded_settings.resolved_database_url
+    author = _install()
+    submitted = _approved(client, seeded_settings, install=author)
+
+    # A third party reporting it.
+    resp = client.post(
+        f"/templates/{submitted['slug']}/report",
+        json={"reason": "shows someone's home address", "install": _install()},
+    )
+    assert resp.status_code == 202
+    report = templates_store.get_report(url, resp.json()["id"])
+    assert report["status"] == "open" and report["by_submitter"] is False
+    assert report["submission_id"] == submitted["id"]
+
+    # The author asking for their own template back is flagged as such.
+    mine = client.post(
+        f"/templates/{submitted['slug']}/report",
+        json={"reason": "posted by mistake", "install": author},
+    )
+    assert templates_store.get_report(url, mine.json()["id"])["by_submitter"] is True
+
+
+def test_report_unknown_and_already_removed(client, seeded_settings):
+    assert client.post("/templates/nope/report", json={"reason": "x"}).status_code == 404
+    submitted = _approved(client, seeded_settings)
+    templates_store.set_status(
+        seeded_settings.resolved_database_url, submitted["id"], "revoked", reviewed_by="111"
+    )
+    resp = client.post(f"/templates/{submitted['slug']}/report", json={"reason": "x"})
+    assert resp.status_code == 202 and resp.json()["status"] == "already_removed"
+
+
+def test_report_daily_quota(client, seeded_settings):
+    submitted = _approved(client, seeded_settings)
+    reporter = _install()
+    for _ in range(5):
+        assert (
+            client.post(
+                f"/templates/{submitted['slug']}/report",
+                json={"reason": "spam", "install": reporter},
+            ).status_code
+            == 202
+        )
+    assert (
+        client.post(
+            f"/templates/{submitted['slug']}/report", json={"reason": "spam", "install": reporter}
+        ).status_code
+        == 429
+    )
+
+
+def test_revoking_closes_open_reports(client, seeded_settings):
+    url = seeded_settings.resolved_database_url
+    submitted = _approved(client, seeded_settings)
+    reported = client.post(
+        f"/templates/{submitted['slug']}/report", json={"reason": "bad", "install": _install()}
+    ).json()
+    templates_store.set_status(url, submitted["id"], "revoked", reviewed_by="111")
+    templates_store.close_reports_for_submission(url, submitted["id"], handled_by="111")
+    assert templates_store.get_report(url, reported["id"])["status"] == "actioned"
+    # And it drops out of the public catalog.
+    assert client.get("/templates/index.json").json()["templates"] == []

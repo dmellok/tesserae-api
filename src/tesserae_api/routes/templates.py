@@ -41,6 +41,8 @@ _MAX_INPUTS = 20
 _MAX_TARGETS = 20
 _MAX_REQUIRES = 32
 _MAX_LINT_ITEMS = 2000
+# Takedown requests per install per day; the review channel is human-paced.
+_MAX_REPORTS_PER_DAY = 5
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 _TARGET_SLOTS = {"options", "source_options", "source_header", "source_url", "bind_options"}
@@ -382,6 +384,74 @@ def template_install(request: Request, body: TemplateInstallBody) -> Response:
         pass
 
     return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "no-store"})
+
+
+class ReportBody(BaseModel):
+    reason: str | None = None
+    install: str | None = None
+    version: str | None = None
+
+
+@router.post("/templates/{slug}/report", status_code=status.HTTP_202_ACCEPTED)
+def report_template(slug: str, request: Request, body: ReportBody) -> JSONResponse:
+    """Request a template's takedown. Open to any install (including the one
+    that submitted it, which is how an author pulls their own work back), and
+    routed to the same review channel as submissions rather than acting
+    automatically: install ids are forgeable, so a self-report is a strong
+    hint, not an authorisation."""
+    settings: Settings = get_settings()
+
+    row = templates_store.get_by_slug(settings.resolved_database_url, slug)
+    if row is None:
+        raise HTTPException(status_code=404, detail="unknown template")
+    if row["status"] not in ("approved", "pending"):
+        # Already gone; nothing to take down.
+        return JSONResponse(
+            {"status": "already_removed"},
+            status_code=status.HTTP_202_ACCEPTED,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    install_uuid = _normalise_install(body.install)
+    if install_uuid and install_uuid.startswith(templates_store.TEST_INSTALL_PREFIX):
+        return JSONResponse(
+            {"status": "received"},
+            status_code=status.HTTP_202_ACCEPTED,
+            headers={"Cache-Control": "no-store"},
+        )
+    if (
+        templates_store.daily_report_count(settings.resolved_database_url, install_uuid)
+        >= _MAX_REPORTS_PER_DAY
+    ):
+        raise HTTPException(status_code=429, detail="too many reports today")
+
+    reason = (body.reason or "").strip()[:1000]
+    report_id = uuid.uuid4().hex
+    templates_store.create_report(
+        settings.resolved_database_url,
+        id=report_id,
+        submission_id=row["id"],
+        slug=row["slug"],
+        reason=reason,
+        install_uuid=install_uuid,
+        by_submitter=bool(install_uuid and install_uuid == row["install_uuid"]),
+    )
+
+    try:
+        report = templates_store.get_report(settings.resolved_database_url, report_id) or {}
+        message_id = discord_client.post_report_message(settings, report, row)
+        if message_id:
+            templates_store.set_report_discord_message(
+                settings.resolved_database_url, report_id, message_id
+            )
+    except Exception:  # noqa: BLE001 - notification must never break the report
+        pass
+
+    return JSONResponse(
+        {"status": "received", "id": report_id},
+        status_code=status.HTTP_202_ACCEPTED,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/templates/{slug}.json")
