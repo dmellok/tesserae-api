@@ -1,6 +1,6 @@
 [project]
 name = "tesserae-api"
-version = "0.11.0"
+version = "0.12.0"
 description = "Public JSON API server for Tesserae widgets (api.tesserae.ink)"
 readme = "README.md"
 requires-python = ">=3.12"
