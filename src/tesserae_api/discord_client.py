@@ -24,6 +24,16 @@ _STYLE_SUCCESS = 3
 _STYLE_DANGER = 4
 _STYLE_SECONDARY = 2
 
+# Discord's per-field value cap. Anything longer is rejected outright, so the
+# inputs list is assembled against a budget rather than trimmed afterwards.
+_FIELD_LIMIT = 1024
+_INPUT_LINE_CAP = 12
+_INPUT_LABEL_CAP = 80
+# Target slots that mean the input shapes an outbound request. Worth naming in
+# the embed: a reviewer approving one of these is approving where a stranger's
+# install will talk to, and with what headers.
+_REQUEST_SLOTS = {"source_url": "request URL", "source_header": "request header"}
+
 
 def _lint_summary(lint_json: str | None) -> str:
     try:
@@ -36,6 +46,52 @@ def _lint_summary(lint_json: str | None) -> str:
     lines = [f"{w.get('rule')}: {w.get('where')} ({w.get('match')})" for w in warnings[:8]]
     if len(warnings) > 8:
         lines.append(f"…and {len(warnings) - 8} more")
+    return "\n".join(lines)
+
+
+def _input_line(spec: Any) -> str:
+    """One declared input as a review line. Never raises: an entry that isn't
+    the shape we expect still renders as something a human can read."""
+    if not isinstance(spec, dict):
+        return f"• {str(spec)[:60]} (unreadable entry)"
+    name = str(spec.get("name") or "?")[:32]
+    facets = [str(spec.get("type") or "?")[:20]]
+    if spec.get("secret"):
+        facets.append("secret")
+    if spec.get("required"):
+        facets.append("required")
+    targets = spec.get("targets") if isinstance(spec.get("targets"), list) else []
+    slots = {t.get("slot") for t in targets if isinstance(t, dict)}
+    facets += sorted({_REQUEST_SLOTS[s] for s in slots if s in _REQUEST_SLOTS})
+    label = " ".join(str(spec.get("label") or "").split())[:_INPUT_LABEL_CAP]
+    mark = "🔒" if spec.get("secret") else "•"
+    return f"{mark} {name} ({', '.join(facets)}){f' {label}' if label else ''}"
+
+
+def _inputs_summary(inputs_json: str | None) -> str:
+    """The install questions a template will ask, one per line. A reviewer
+    approving a template is approving what it asks a stranger for, so the
+    names, types and secret flags belong in the embed rather than a count."""
+    try:
+        specs = json.loads(inputs_json or "[]")
+    except ValueError:
+        return "inputs list unreadable"
+    if not isinstance(specs, list):
+        return "inputs list unreadable"
+    if not specs:
+        return "none (installs without asking anything)"
+    # Leave room for the trailing "…and N more" before spending the budget.
+    budget = _FIELD_LIMIT - 32
+    lines: list[str] = []
+    used = 0
+    for spec in specs[:_INPUT_LINE_CAP]:
+        line = _input_line(spec)
+        if used + len(line) + 1 > budget:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if len(lines) < len(specs):
+        lines.append(f"…and {len(specs) - len(lines)} more")
     return "\n".join(lines)
 
 
@@ -52,6 +108,7 @@ def submission_embed(settings: Settings, row: dict[str, Any]) -> dict[str, Any]:
             {"name": "App version", "value": row.get("tesserae_version") or "?", "inline": True},
             {"name": "Tags", "value": tags, "inline": True},
             {"name": "Requires", "value": requires, "inline": True},
+            {"name": "Asks the installer for", "value": _inputs_summary(row.get("inputs_spec"))},
             {"name": "Lint", "value": _lint_summary(row.get("lint"))[:1024]},
         ],
         "image": {"url": f"{settings.public_base_url}/templates/preview/{row.get('id')}.png"},
