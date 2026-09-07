@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     # descriptor-<kind>.json assets, one per OTA-capable device kind.
     firmware_repo: str = "dmellok/tesserae-device-firmware"
 
+    # Community firmware feeds: device kinds whose firmware lives in a repo
+    # that publishes plain releases without a descriptor-<kind>.json asset.
+    # Every published (non-draft, non-prerelease) release of such a repo counts
+    # as covering its kind. The response then carries the release's files but
+    # no descriptor_url, so a Tesserae server shows "update available" and links
+    # the release without offering an OTA it cannot verify. Comma-separated
+    # ``kind=owner/repo`` pairs.
+    community_firmware_repos: str = "picpak_client=varanu5/picpak-tesserae-client"
+
     # Reported app versions to block from recording, as comma-separated prefixes.
     # A caller reporting a blocked version is not recorded and gets a notice to
     # stop or update. Used to keep an errant test harness or stale dev build out
@@ -102,6 +111,16 @@ class Settings(BaseSettings):
     @property
     def repo_slug(self) -> str:
         return f"{self.repo_owner}/{self.repo_name}"
+
+    @property
+    def community_firmware_sources(self) -> dict[str, str]:
+        """``{kind: "owner/repo"}`` parsed from ``community_firmware_repos``."""
+        sources: dict[str, str] = {}
+        for pair in self.community_firmware_repos.split(","):
+            kind, sep, repo = pair.strip().partition("=")
+            if sep and kind.strip() and repo.strip():
+                sources[kind.strip()] = repo.strip()
+        return sources
 
     @property
     def blocked_version_prefixes(self) -> tuple[str, ...]:

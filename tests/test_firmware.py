@@ -37,6 +37,16 @@ def test_firmware_latest_shape(client):
     assert latest["assets"][0]["content_type"] == "application/json"
 
 
+def test_firmware_community_kind_shape(client):
+    resp = client.get("/firmware/picpak_client/latest", params={"current": "0.9.3"})
+    assert resp.status_code == 200
+    latest = resp.json()["latest"]
+    assert latest["version"] == "0.9.4"
+    assert latest["url"].endswith("/v0.9.4")
+    assert latest["descriptor_url"] is None
+    assert latest["assets"][0]["name"] == "picpak-tesserae-firmware.bin"
+
+
 def test_firmware_walks_back_to_older_release(client):
     body = client.get("/firmware/legacy_kind/latest").json()
     assert body["latest"]["version"] == "1.5.0"

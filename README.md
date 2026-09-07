@@ -117,6 +117,13 @@ if the newest release does not cover the kind, older releases are walked until o
 therefore discovered from the release assets, not a config file. Releases are polled and cached to
 disk (authenticated with a GitHub token).
 
+Community firmware kept in its author's repo is covered too: `TESSERAE_COMMUNITY_FIRMWARE_REPOS`
+lists `kind=owner/repo` pairs (default `picpak_client=varanu5/picpak-tesserae-client`). Every
+published release of such a repo covers its kind. The response then lists the release's files as
+`assets` and sets `descriptor_url` to `null`, so a Tesserae server shows the badge and links the
+release without offering an OTA it cannot verify. A community repo that fails to fetch keeps its
+entries from the previous cache and never blocks the main feed.
+
 Query parameter: `current` (optional) is the caller's running firmware version, recorded for the
 version distribution; it does not change the response. Response header:
 `Cache-Control: public, max-age=300`.

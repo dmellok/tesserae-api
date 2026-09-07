@@ -117,15 +117,35 @@ def _descriptor(kind: str, version: str) -> dict:
     }
 
 
+def _file(name: str, tag: str, size: int = 1_048_576) -> dict:
+    url = f"https://github.com/varanu5/picpak-tesserae-client/releases/download/{tag}/{name}"
+    return {"name": name, "url": url, "size": size, "content_type": "application/octet-stream"}
+
+
 # Firmware cache, shaped as firmware.build_cache() produces it: releases newest
-# first, each indexing its descriptor-<kind>.json assets by kind.
+# first, each indexing the kinds it covers. Descriptor releases map a kind to
+# its descriptor-<kind>.json asset; community releases map their kind to None.
 SEED_FIRMWARE_CACHE = {
     "releases": [
+        {
+            "version": "0.9.4",
+            "released_at": "2026-09-06T16:57:20Z",
+            "url": "https://github.com/varanu5/picpak-tesserae-client/releases/tag/v0.9.4",
+            "notes_headline": "PicPak Tesserae Client: firmware release",
+            "repo": "varanu5/picpak-tesserae-client",
+            "assets": [
+                _file("picpak-tesserae-firmware.bin", "v0.9.4"),
+                _file("SHA256SUMS", "v0.9.4", 512),
+            ],
+            "kinds": {"picpak_client": None},
+        },
         {
             "version": "1.6.0",
             "released_at": "2026-07-22T10:00:00Z",
             "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.6.0",
             "notes_headline": "Safe Wi-Fi OTA for E1004",
+            "repo": "dmellok/tesserae-device-firmware",
+            "assets": [_descriptor("seeed_reterminal_e1004", "1.6.0")],
             "kinds": {
                 "seeed_reterminal_e1004": _descriptor("seeed_reterminal_e1004", "1.6.0"),
                 "seeed_ee02": _descriptor("seeed_ee02", "1.6.0"),
@@ -136,6 +156,8 @@ SEED_FIRMWARE_CACHE = {
             "released_at": "2026-07-19T10:00:00Z",
             "url": "https://github.com/dmellok/tesserae-device-firmware/releases/tag/v1.5.0",
             "notes_headline": "Older release",
+            "repo": "dmellok/tesserae-device-firmware",
+            "assets": [_descriptor("seeed_reterminal_e1004", "1.5.0")],
             "kinds": {
                 "seeed_reterminal_e1004": _descriptor("seeed_reterminal_e1004", "1.5.0"),
                 # A kind only the older release covers, to exercise walking back.
