@@ -25,6 +25,7 @@ The store is addressed by a SQLAlchemy URL so the same code runs against SQLite
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -91,7 +92,20 @@ _HEARTBEAT_FIELDS = (
     "ha",
     "country",
     "region",
+    "age",
+    "lineups",
+    "feat_relay",
+    "feat_touch",
+    "feat_mcp",
+    "feat_quiet_hours",
+    "ota_offered",
+    "ota_applied",
+    "ota_failed",
 )
+
+# Per-kind descriptive columns beyond the kind itself; all upserted to the
+# latest ping of the day.
+_KIND_FIELDS = ("fw_version", "gamut", "res", "sleep")
 
 heartbeats = Table(
     "heartbeats",
@@ -110,6 +124,15 @@ heartbeats = Table(
     Column("ha", Boolean),
     Column("country", String),
     Column("region", String),
+    Column("age", String),  # bucketed days since the install id was minted
+    Column("lineups", String),  # bucketed count of lineups
+    Column("feat_relay", Boolean),  # cloud relay linked
+    Column("feat_touch", Boolean),  # a touch-capable device in use
+    Column("feat_mcp", Boolean),  # MCP experiment on
+    Column("feat_quiet_hours", Boolean),  # quiet hours configured on a device
+    Column("ota_offered", String),  # bucketed devices offered a firmware release
+    Column("ota_applied", String),  # bucketed devices already on it
+    Column("ota_failed", String),  # bucketed devices whose last OTA report failed
     UniqueConstraint("day", "install_uuid", name="uq_heartbeats_day_install"),
     Index("idx_heartbeats_install", "install_uuid"),
     Index("idx_heartbeats_day", "day"),
@@ -122,6 +145,9 @@ heartbeat_kinds = Table(
     Column("install_uuid", String),
     Column("kind", String, nullable=False),
     Column("fw_version", String),  # reported firmware version for this kind, if any
+    Column("gamut", String),  # declared panel gamut (bwry_4, gray_4, ...)
+    Column("res", String),  # declared panel resolution, landscape WxH
+    Column("sleep", String),  # bucketed wake cadence
     UniqueConstraint("day", "install_uuid", "kind", name="uq_heartbeat_kinds"),
     Index("idx_heartbeat_kinds_kind", "kind"),
 )
@@ -144,8 +170,24 @@ firmware_check_stats = Table(
 # Columns added after a table first shipped, applied in place to pre-existing tables.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "hits": {"kind": "VARCHAR"},
-    "heartbeat_kinds": {"fw_version": "VARCHAR"},
-    "heartbeats": {"companion": "VARCHAR"},
+    "heartbeat_kinds": {
+        "fw_version": "VARCHAR",
+        "gamut": "VARCHAR",
+        "res": "VARCHAR",
+        "sleep": "VARCHAR",
+    },
+    "heartbeats": {
+        "companion": "VARCHAR",
+        "age": "VARCHAR",
+        "lineups": "VARCHAR",
+        "feat_relay": "BOOLEAN",
+        "feat_touch": "BOOLEAN",
+        "feat_mcp": "BOOLEAN",
+        "feat_quiet_hours": "BOOLEAN",
+        "ota_offered": "VARCHAR",
+        "ota_applied": "VARCHAR",
+        "ota_failed": "VARCHAR",
+    },
 }
 
 # One engine per URL, reused across requests (SQLAlchemy pools connections).
@@ -272,7 +314,11 @@ def record_heartbeat(
     ha: bool | None = None,
     country: str | None = None,
     region: str | None = None,
-    device_kinds: list[tuple[str, str | None]] | None = None,
+    device_kinds: list[tuple[str, str | None]] | list[dict[str, Any]] | None = None,
+    age: str | None = None,
+    lineups: str | None = None,
+    features: dict[str, bool | None] | None = None,
+    ota: dict[str, str | None] | None = None,
     day: date | None = None,
 ) -> None:
     """Upsert one heartbeat for (day, install). Repeated pings the same day collapse
@@ -280,10 +326,15 @@ def record_heartbeat(
 
     The day is server-derived (UTC) and no exact time is stored. A NULL install_uuid
     cannot dedupe (unique NULLs are distinct), so anonymous heartbeats accumulate.
+
+    ``device_kinds`` items are either ``(kind, fw_version)`` tuples or dicts with
+    ``kind`` plus any of ``fw_version`` / ``gamut`` / ``res`` / ``sleep``.
     """
     day = day or datetime.now(UTC).date()
     engine = get_engine(url)
     ins = _upsert_insert(engine)
+    features = features or {}
+    ota = ota or {}
     descriptive = {
         "version": version,
         "channel": channel,
@@ -297,6 +348,15 @@ def record_heartbeat(
         "ha": ha,
         "country": country,
         "region": region,
+        "age": age,
+        "lineups": lineups,
+        "feat_relay": features.get("relay"),
+        "feat_touch": features.get("touch"),
+        "feat_mcp": features.get("mcp"),
+        "feat_quiet_hours": features.get("quiet_hours"),
+        "ota_offered": ota.get("offered"),
+        "ota_applied": ota.get("applied"),
+        "ota_failed": ota.get("failed"),
     }
     with engine.begin() as conn:
         stmt = ins(heartbeats).values(day=day, install_uuid=install_uuid, **descriptive)
@@ -306,13 +366,21 @@ def record_heartbeat(
         )
         conn.execute(stmt)
 
-        for kind, fw_version in device_kinds or []:
+        for item in device_kinds or []:
+            if isinstance(item, dict):
+                kind = item.get("kind")
+                fields = {name: item.get(name) for name in _KIND_FIELDS}
+            else:
+                kind, fw_version = item
+                fields = {"fw_version": fw_version, "gamut": None, "res": None, "sleep": None}
+            if not kind:
+                continue
             kind_stmt = ins(heartbeat_kinds).values(
-                day=day, install_uuid=install_uuid, kind=kind, fw_version=fw_version
+                day=day, install_uuid=install_uuid, kind=kind, **fields
             )
             kind_stmt = kind_stmt.on_conflict_do_update(
                 index_elements=["day", "install_uuid", "kind"],
-                set_={"fw_version": kind_stmt.excluded.fw_version},
+                set_={name: kind_stmt.excluded[name] for name in _KIND_FIELDS},
             )
             conn.execute(kind_stmt)
 

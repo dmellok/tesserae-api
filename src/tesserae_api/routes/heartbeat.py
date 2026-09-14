@@ -28,8 +28,16 @@ _OS = {"linux", "macos", "windows", "other"}
 _ARCH = {"x86_64", "arm64", "arm", "other"}
 _DEPLOY = {"docker", "ha_addon", "pip", "lxc", "source", "unknown"}
 _TRANSPORT = {"mqtt", "rest", "both", "none", "unknown"}
-# Shared bucket vocabulary for count fields (devices, companion).
+# Shared bucket vocabulary for count fields (devices, companion, lineups, ota_*).
 _BUCKETS = {"0", "1", "2-3", "4-9", "10+"}
+# Install age in days since the id was minted.
+_AGE_BUCKETS = {"0", "1-7", "8-30", "31-90", "90+"}
+# Device wake cadence.
+_SLEEP_BUCKETS = {"<5m", "5-15m", "15-60m", "1-6h", "6h+", "always_on"}
+_GAMUT_RE = re.compile(r"^[a-z0-9_]{1,24}$")
+_RES_RE = re.compile(r"^\d{2,5}x\d{2,5}$")
+_FEATURES = ("relay", "touch", "mcp", "quiet_hours")
+_OTA = ("offered", "applied", "failed")
 _PY_RE = re.compile(r"^3\.\d{1,2}$")
 _KIND_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
 _MAX_KINDS = 32
@@ -87,6 +95,49 @@ def _ha(value: Any) -> bool | None:
     return None if value is None else bool(value)
 
 
+def _age(value: Any) -> str | None:
+    text = _str(value)
+    if text is None:
+        return None
+    return text if text in _AGE_BUCKETS else "unknown"
+
+
+def _features(value: Any) -> dict[str, bool | None]:
+    """Coerce the feature booleans; absent object or key stays None."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        name: (None if value.get(name) is None else bool(value.get(name))) for name in _FEATURES
+    }
+
+
+def _ota(value: Any) -> dict[str, str | None]:
+    if not isinstance(value, dict):
+        return {}
+    return {name: _bucket(value.get(name)) for name in _OTA}
+
+
+def _clean_gamut(value: Any) -> str | None:
+    text = _str(value)
+    if text is None:
+        return None
+    return text if _GAMUT_RE.match(text) else "unknown"
+
+
+def _clean_res(value: Any) -> str | None:
+    text = _str(value)
+    if text is None:
+        return None
+    return text if _RES_RE.match(text) else "unknown"
+
+
+def _clean_sleep(value: Any) -> str | None:
+    text = _str(value)
+    if text is None:
+        return None
+    return text if text in _SLEEP_BUCKETS else "unknown"
+
+
 def _clean_fw(value: Any) -> str | None:
     """Normalise a firmware version: bare semver, one optional leading v. Else None."""
     if not isinstance(value, str):
@@ -103,31 +154,57 @@ def _clean_fw(value: Any) -> str | None:
     return text
 
 
-def _clean_kinds(value: Any) -> list[tuple[str, str | None]]:
-    """Parse device_kinds into (kind, fw_version) pairs.
+def _clean_kinds(value: Any, fw_by_kind: Any = None) -> list[dict[str, Any]]:
+    """Parse the per-kind list into ``{kind, fw_version, gamut, res, sleep}`` dicts.
 
-    Each item may be a bare slug string or an object {"kind": ..., "fw_version": ...}.
-    Keeps valid slugs only, dedupes on kind (order-preserving), caps at 32, and
-    normalises the firmware version (non-semver becomes None).
+    Each item may be a bare slug string or an object with ``kind`` plus any of
+    ``fw_version`` / ``gamut`` / ``res`` / ``sleep``. Keeps valid slugs only,
+    dedupes on kind (order-preserving), caps at 32, and normalises every
+    descriptive field (non-semver firmware becomes None, unknown vocab becomes
+    ``unknown``).
+
+    ``fw_by_kind`` is the legacy ``{kind: [versions]}`` map that app builds
+    before 0.415 sent next to a bare-string ``device_kinds`` list. It was never
+    read, so every install's firmware landed as unknown; the newest listed
+    version now fills a bare item's ``fw_version``.
     """
     if not isinstance(value, list):
         return []
-    out: list[tuple[str, str | None]] = []
+    legacy: dict[str, str] = {}
+    if isinstance(fw_by_kind, dict):
+        for kind, versions in fw_by_kind.items():
+            if isinstance(kind, str) and isinstance(versions, list):
+                cleaned = [v for v in (_clean_fw(x) for x in versions) if v]
+                if cleaned:
+                    legacy[kind] = _newest(cleaned)
+    out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in value:
         if isinstance(item, str):
-            kind, fw = item, None
+            kind, fields = item, {"fw_version": legacy.get(item)}
         elif isinstance(item, dict):
-            kind, fw = item.get("kind"), item.get("fw_version")
+            kind = item.get("kind")
+            fields = {
+                "fw_version": _clean_fw(item.get("fw_version"))
+                or (legacy.get(kind) if isinstance(kind, str) else None),
+                "gamut": _clean_gamut(item.get("gamut")),
+                "res": _clean_res(item.get("res")),
+                "sleep": _clean_sleep(item.get("sleep")),
+            }
         else:
             continue
         if not isinstance(kind, str) or kind in seen or not _KIND_RE.match(kind):
             continue
         seen.add(kind)
-        out.append((kind, _clean_fw(fw)))
+        out.append({"kind": kind, **fields})
         if len(out) >= _MAX_KINDS:
             break
     return out
+
+
+def _newest(versions: list[str]) -> str:
+    """The highest semver in a list of already-cleaned versions."""
+    return max(versions, key=Version)
 
 
 @router.post("/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
@@ -160,7 +237,18 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
             ha=_ha(data.get("ha")),
             country=country,
             region=region,
-            device_kinds=_clean_kinds(data.get("device_kinds")),
+            # ``kinds`` (0.415+) carries the per-kind objects; older builds send a
+            # bare ``device_kinds`` list plus the ``fw_by_kind`` map.
+            device_kinds=_clean_kinds(
+                data.get("kinds")
+                if isinstance(data.get("kinds"), list)
+                else data.get("device_kinds"),
+                data.get("fw_by_kind"),
+            ),
+            age=_age(data.get("age")),
+            lineups=_bucket(data.get("lineups")),
+            features=_features(data.get("features")),
+            ota=_ota(data.get("ota")),
         )
     except Exception:
         # Stats collection must never break the response the app depends on.

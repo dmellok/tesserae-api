@@ -261,3 +261,98 @@ def test_post_heartbeat_idempotent_via_route(client, seeded_settings):
         client.post("/heartbeat", json={"install": UUID_A, "version": "0.94.2"})
     # Three pings on the same UTC day collapse to one install row.
     assert len(_rows(seeded_settings.stats_db_path, "heartbeats")) == 1
+
+
+# 0.415 payload: kinds objects, legacy fw_by_kind, age, lineups, features, ota --
+
+
+def test_post_heartbeat_kinds_objects_land_with_panel_facts(client, seeded_settings):
+    resp = client.post(
+        "/heartbeat",
+        json={
+            "install": UUID_A,
+            "version": "0.415.0",
+            "channel": "edge",
+            "device_kinds": ["esp32_client"],
+            "fw_by_kind": {"esp32_client": ["1.2.0"]},  # legacy map, ignored when kinds present
+            "kinds": [
+                {
+                    "kind": "esp32_client",
+                    "fw_version": "v1.4.0",
+                    "gamut": "bwry_4",
+                    "res": "800x480",
+                    "sleep": "5-15m",
+                },
+                {"kind": "weird kind!", "fw_version": "1.0.0"},  # dropped: bad slug
+                {"kind": "pi_bin_client", "gamut": "Nope!", "res": "big", "sleep": "never"},
+            ],
+            "age": "8-30",
+            "lineups": "2-3",
+            "features": {"relay": True, "touch": False, "mcp": 0, "quiet_hours": None},
+            "ota": {"offered": "2-3", "applied": "1", "failed": "0"},
+        },
+    )
+    assert resp.status_code == 204
+    hb = _rows(seeded_settings.stats_db_path, "heartbeats")
+    assert len(hb) == 1
+    assert hb[0]["channel"] == "edge"
+    assert hb[0]["age"] == "8-30"
+    assert hb[0]["lineups"] == "2-3"
+    assert bool(hb[0]["feat_relay"]) is True
+    assert bool(hb[0]["feat_touch"]) is False
+    assert bool(hb[0]["feat_mcp"]) is False
+    assert hb[0]["feat_quiet_hours"] is None
+    assert (hb[0]["ota_offered"], hb[0]["ota_applied"], hb[0]["ota_failed"]) == ("2-3", "1", "0")
+    kinds = {r["kind"]: r for r in _rows(seeded_settings.stats_db_path, "heartbeat_kinds")}
+    assert set(kinds) == {"esp32_client", "pi_bin_client"}
+    esp = kinds["esp32_client"]
+    assert (esp["fw_version"], esp["gamut"], esp["res"], esp["sleep"]) == (
+        "1.4.0",
+        "bwry_4",
+        "800x480",
+        "5-15m",
+    )
+    pi = kinds["pi_bin_client"]
+    assert (pi["fw_version"], pi["gamut"], pi["res"], pi["sleep"]) == (
+        None,
+        "unknown",
+        "unknown",
+        "unknown",
+    )
+
+
+def test_post_heartbeat_legacy_fw_by_kind_fills_firmware(client, seeded_settings):
+    """Builds before 0.415 send bare ``device_kinds`` + ``fw_by_kind``; the
+    newest listed version per kind lands instead of NULL."""
+    resp = client.post(
+        "/heartbeat",
+        json={
+            "install": UUID_A,
+            "device_kinds": ["esp32_client", "pi_bin_client"],
+            "fw_by_kind": {"esp32_client": ["1.2.0", "1.10.0", "garbage"], "other": ["9.9.9"]},
+        },
+    )
+    assert resp.status_code == 204
+    kinds = {r["kind"]: r for r in _rows(seeded_settings.stats_db_path, "heartbeat_kinds")}
+    assert kinds["esp32_client"]["fw_version"] == "1.10.0"  # semver max, not lexical
+    assert kinds["pi_bin_client"]["fw_version"] is None
+    assert kinds["esp32_client"]["gamut"] is None  # legacy builds carry no panel facts
+
+
+def test_post_heartbeat_new_fields_absent_stay_null(client, seeded_settings):
+    resp = client.post("/heartbeat", json={"install": UUID_A, "version": "0.400.0"})
+    assert resp.status_code == 204
+    row = _rows(seeded_settings.stats_db_path, "heartbeats")[0]
+    for col in ("age", "lineups", "feat_relay", "ota_offered"):
+        assert row[col] is None
+
+
+def test_post_heartbeat_age_and_ota_coerced(client, seeded_settings):
+    client.post(
+        "/heartbeat",
+        json={"install": UUID_A, "age": "yesterday", "ota": {"offered": "lots"}},
+    )
+    row = _rows(seeded_settings.stats_db_path, "heartbeats")[0]
+    assert row["age"] == "unknown"
+    assert row["ota_offered"] == "unknown"
+    assert row["ota_applied"] is None
