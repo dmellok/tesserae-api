@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # Number of recent releases / commits to retain for "behind" calculations.
     history_limit: int = 100
 
+    # Live flash notifications: every completed flash reported by the web
+    # flasher (POST /flash/events) is forwarded as a JSON POST to this URL,
+    # e.g. a Home Assistant webhook that rings a desk bell over MQTT. Empty
+    # (default) accepts the reports and forwards nothing.
+    flash_webhook_url: str = ""
+
     # -- template marketplace ------------------------------------------
     # Discord review channel: submissions post as embeds with Approve/Reject
     # buttons via the bot token (plain webhooks can't carry components), and

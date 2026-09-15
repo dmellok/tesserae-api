@@ -43,6 +43,18 @@ api.tesserae.ink {
 			events 10
 			window 1h
 		}
+		# Flash completion reports fan out to a webhook (a physical bell in the
+		# reference deployment); a real person flashes a handful of boards an
+		# hour at most, so a scripted loop cannot keep it ringing.
+		zone flash_events {
+			match {
+				method POST
+				path /flash/events
+			}
+			key {remote_host}
+			events 12
+			window 1h
+		}
 	}
 
 	reverse_proxy 127.0.0.1:8000

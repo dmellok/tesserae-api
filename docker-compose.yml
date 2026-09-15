@@ -57,6 +57,9 @@ services:
       TESSERAE_DISCORD_CHANNEL_ID: ${TESSERAE_DISCORD_CHANNEL_ID:-}
       TESSERAE_DISCORD_REVIEWER_IDS: ${TESSERAE_DISCORD_REVIEWER_IDS:-}
       TESSERAE_AUTHOR_SECRET: ${TESSERAE_AUTHOR_SECRET:-}
+      # Live flash notifications: webhook that receives every completed web
+      # flash as JSON (set in .env; empty = reports are accepted and dropped).
+      TESSERAE_FLASH_WEBHOOK_URL: ${TESSERAE_FLASH_WEBHOOK_URL:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s

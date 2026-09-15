@@ -47,6 +47,7 @@ src/tesserae_api/
   config.py                settings (paths, repo slug, GitHub token)
   routes/version.py        GET /version/latest
   routes/firmware.py       GET /firmware/{kind}/latest
+  routes/flash.py          POST /flash/events
   cache/github_releases.py version polling, cache read/write, channel resolution
   cache/firmware.py        firmware release polling by descriptor asset, resolution
   stats/collector.py       aggregate writes (SQLAlchemy: SQLite dev, Postgres prod)
@@ -217,6 +218,27 @@ paired companion apps). `device_kinds` keeps only
 `^[a-z0-9_-]{1,64}$` slugs, deduped and capped at 32. Same geo posture as the other endpoints: the
 IP is used for a coarse country/region lookup then discarded. Install-level heartbeat rows are not
 exposed publicly; the maintainer reads aggregates via `scripts/dump_stats.py`.
+
+### `POST /flash/events`
+
+Called by the web flasher at tesserae.ink/flash once a firmware write completes, so the maintainer
+can react live (the reference deployment rings a desk bell over MQTT). JSON body (all fields
+optional strings):
+
+```json
+{
+  "device": "Seeed reTerminal E1001", "vendor": "Seeed", "model": "reTerminal E1001",
+  "env": "seeed_reterminal_e1001", "firmware_version": "1.37.0", "chip": "ESP32-S3",
+  "mode": "catalog", "method": "webserial", "factory_reset": "false"
+}
+```
+
+Returns `204 No Content` with `Cache-Control: no-store`, always, whether or not anything is listening.
+Nothing is stored. When `TESSERAE_FLASH_WEBHOOK_URL` is set, the allow-listed fields above (each
+whitespace-collapsed and clipped) are forwarded as a JSON POST with an added
+`"event": "firmware_flash_completed"`, off the request path and best-effort; any other field in the
+body is dropped before it leaves the process. No IP, User-Agent or install id is forwarded. Caddy
+rate-limits the route to 12 reports per hour per IP.
 
 Interactive OpenAPI docs are served at `/docs`.
 
