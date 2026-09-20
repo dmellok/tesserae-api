@@ -55,6 +55,17 @@ api.tesserae.ink {
 			events 12
 			window 1h
 		}
+		# Cloud waitlist sign-ups: one person joins once, so a handful an hour
+		# per address is plenty and a script cannot pad the list.
+		zone cloud_waitlist {
+			match {
+				method POST
+				path /cloud/waitlist*
+			}
+			key {remote_host}
+			events 5
+			window 1h
+		}
 	}
 
 	reverse_proxy 127.0.0.1:8000

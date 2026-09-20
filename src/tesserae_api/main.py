@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from tesserae_api.cache import firmware, github_releases
 from tesserae_api.config import get_settings
+from tesserae_api.routes import cloud as cloud_routes
 from tesserae_api.routes import discord as discord_routes
 from tesserae_api.routes import firmware as firmware_routes
 from tesserae_api.routes import flash as flash_routes
@@ -46,14 +47,15 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Tesserae API",
-        version="0.15.0",
+        version="0.16.0",
         description="Public JSON API for Tesserae widgets.",
         lifespan=lifespan,
     )
 
     # Widgets fetch from a Chromium browser context, so any origin must be allowed.
-    # POST is in the list for the web flasher's completion report (/flash/events),
-    # which is a cross-origin call from tesserae.ink.
+    # POST is in the list for the web flasher's cross-origin calls from
+    # tesserae.ink: the completion report (/flash/events) and the Cloud
+    # waitlist (/cloud/waitlist).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -64,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(version.router)
     app.include_router(firmware_routes.router)
     app.include_router(flash_routes.router)
+    app.include_router(cloud_routes.router)
     app.include_router(widgets.router)
     app.include_router(heartbeat.router)
     app.include_router(templates.router)

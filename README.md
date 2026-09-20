@@ -240,6 +240,25 @@ whitespace-collapsed and clipped) are forwarded as a JSON POST with an added
 body is dropped before it leaves the process. No IP, User-Agent or install id is forwarded. Caddy
 rate-limits the route to 12 reports per hour per IP.
 
+### `POST /cloud/waitlist`
+
+The Tesserae Cloud waitlist on tesserae.ink/flash. Tesserae Cloud is a hosted option that only gets
+built if enough people ask for it, and this is where the asking is counted. JSON body:
+
+```json
+{
+  "email": "you@example.com", "source": "flash",
+  "vendor": "Seeed", "model": "reTerminal E1001", "env": "seeed_reterminal_e1001"
+}
+```
+
+`email` is required (trimmed, lowercased, a loose shape check; anything else is `422`). The other
+fields are optional strings naming the panel picked on the flasher at the time, clipped like the
+flash report. Returns `204 No Content` with `Cache-Control: no-store` whether the address was new or
+already listed, so the endpoint cannot be used to check who signed up. A coarse country is derived
+from the IP, which is then discarded. `POST /cloud/waitlist/leave` with the same `{"email": ...}`
+removes the row and answers `204`. Caddy rate-limits both to 5 per hour per IP.
+
 Interactive OpenAPI docs are served at `/docs`.
 
 ## Aggregate stats collected
@@ -276,6 +295,11 @@ Firmware checks (`GET /firmware/{kind}/latest`) write only to `firmware_check_st
 aggregate-only counter keyed `UNIQUE(day, kind, version, country)` with a `count` column. There is
 no per-request row, no IP, and no install id: the endpoint upserts a count and stores a coarse
 country only.
+
+The Cloud waitlist is `cloud_waitlist` (`email PRIMARY KEY, source, vendor, model, env, country,
+created_at`), written by `POST /cloud/waitlist` and cleared per row by `POST /cloud/waitlist/leave`.
+It is the one table holding something a person typed about themselves; the address is there because
+they asked to be told about a hosted Tesserae, and it is used for that one email and nothing else.
 
 What is deliberately **not** collected, ever:
 

@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import distinct, func, select
 from sqlalchemy.engine import Engine
 
+from tesserae_api import waitlist  # registers cloud_waitlist on the metadata before init_db
 from tesserae_api.config import get_settings
 from tesserae_api.stats.collector import get_engine, hits, init_db
 
@@ -116,6 +117,25 @@ def summarise(url: str, now: datetime | None = None) -> None:
     print(f"  last   7 days   {_new_installs_last(engine, 7, now)}")
 
     _summarise_heartbeats(url)
+    _summarise_waitlist(url, now)
+
+
+def _summarise_waitlist(url: str, now: datetime) -> None:
+    _print_header("Cloud waitlist")
+    print(f"  total           {waitlist.count(url)}")
+    for days in (7, 30):
+        print(f"  last {days:>3} days   {waitlist.count(url, days=days, now=now)}")
+    for title, column, default in (
+        ("Cloud waitlist by country", "country", "??"),
+        ("Cloud waitlist by panel", "env", "(no panel picked)"),
+        ("Cloud waitlist by source", "source", "(unknown)"),
+    ):
+        _print_header(title)
+        rows = waitlist.distribution(url, column, default)
+        for name, n in rows.items():
+            print(f"  {str(name):<24} {n}")
+        if not rows:
+            print("  (none)")
 
 
 def _summarise_heartbeats(url: str) -> None:
