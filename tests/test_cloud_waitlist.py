@@ -117,3 +117,45 @@ def test_cross_origin_preflight_allows_the_flasher_post(client):
     )
     assert res.status_code == 200
     assert "POST" in res.headers["access-control-allow-methods"]
+
+
+def test_referrer_is_kept_as_host_and_path(client, seeded_settings):
+    body = {
+        **BODY,
+        "referrer": "https://user:pw@News.YCombinator.com:443/item/?id=123&token=abc#top",
+    }
+    client.post("/cloud/waitlist", json=body)
+    (row,) = _rows(seeded_settings)
+    assert row["referrer"] == "news.ycombinator.com/item"
+
+
+def test_referrer_that_is_not_a_web_url_is_dropped(client, seeded_settings):
+    for i, bad in enumerate(
+        (None, 42, "", "   ", "javascript:alert(1)", "not a url", "ftp://x.io/y")
+    ):
+        client.post("/cloud/waitlist", json={"email": f"r{i}@example.com", "referrer": bad})
+    assert all(row["referrer"] is None for row in _rows(seeded_settings))
+
+
+def test_referrer_is_capped():
+    long = "https://example.com/" + "a" * 500
+    assert len(waitlist.clean_referrer(long)) == waitlist.MAX_REFERRER
+    assert waitlist.clean_referrer("https://reddit.com/") == "reddit.com"
+
+
+def test_referrer_column_is_added_to_an_existing_table(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    with create_engine(url).begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE cloud_waitlist (email VARCHAR PRIMARY KEY, source VARCHAR NOT NULL,"
+                " vendor VARCHAR, model VARCHAR, env VARCHAR, country VARCHAR,"
+                " created_at TIMESTAMP NOT NULL)"
+            )
+        )
+    init_db(url)
+    cols = {c["name"] for c in inspect(get_engine(url)).get_columns("cloud_waitlist")}
+    assert "referrer" in cols
+    assert waitlist.add(url, email="old@example.com", country=None, referrer="t.co")

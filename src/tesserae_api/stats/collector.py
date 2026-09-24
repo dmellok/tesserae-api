@@ -170,6 +170,7 @@ firmware_check_stats = Table(
 # Columns added after a table first shipped, applied in place to pre-existing tables.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "hits": {"kind": "VARCHAR"},
+    "cloud_waitlist": {"referrer": "VARCHAR"},
     "heartbeat_kinds": {
         "fw_version": "VARCHAR",
         "gamut": "VARCHAR",
@@ -211,7 +212,10 @@ def init_db(url: str) -> None:
 
 def _apply_added_columns(engine: Engine) -> None:
     inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
     for table, columns in _ADDED_COLUMNS.items():
+        if table not in tables:  # defined in a module this process never imported
+            continue
         existing = {col["name"] for col in inspector.get_columns(table)}
         for name, sql_type in columns.items():
             if name not in existing:

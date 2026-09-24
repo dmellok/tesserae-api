@@ -3,9 +3,10 @@
 The web flasher at tesserae.ink/flash carries a sign-up block for Tesserae
 Cloud, a hosted option that only gets built if enough people want it. This is
 how that gets counted. The body's email is stored (lowercased, once); the
-panel picked on the flasher at the time and a coarse country ride along so the
-demand can be read by device and region. Nothing else about the request is
-kept: no IP, no User-Agent. ``/cloud/waitlist/leave`` takes the address off
+panel picked on the flasher at the time, the site that referred the visitor
+(host and path, sent by the page) and a coarse country ride along so the
+demand can be read by device, region and channel. Nothing else about the
+request is kept: no IP, no User-Agent. ``/cloud/waitlist/leave`` takes the address off
 again.
 """
 

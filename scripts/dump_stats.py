@@ -129,11 +129,12 @@ def _summarise_waitlist(url: str, now: datetime) -> None:
         ("Cloud waitlist by country", "country", "??"),
         ("Cloud waitlist by panel", "env", "(no panel picked)"),
         ("Cloud waitlist by source", "source", "(unknown)"),
+        ("Cloud waitlist by referrer", "referrer", "(direct / none)"),
     ):
         _print_header(title)
         rows = waitlist.distribution(url, column, default)
         for name, n in rows.items():
-            print(f"  {str(name):<24} {n}")
+            print(f"  {str(name):<40} {n}")
         if not rows:
             print("  (none)")
 

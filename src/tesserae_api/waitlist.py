@@ -6,8 +6,9 @@ deploy:
   cloud_waitlist   one row per email address that asked to hear about a hosted
                    Tesserae, keyed on the lowercased address so a second sign-up
                    is a no-op. Alongside the address: where the form was (the
-                   web flasher), the panel picked at the time if any, a coarse
-                   country, and the day it was added.
+                   web flasher or the homepage), the panel picked at the time if
+                   any, the site that referred the visitor (host and path only),
+                   a coarse country, and the day it was added.
 
 The address is the only personal data the API stores anywhere, it is stored
 because the person typed it in for exactly this purpose, and it leaves again
@@ -19,6 +20,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import Column, DateTime, String, Table, delete, func, select
 
@@ -33,6 +35,7 @@ cloud_waitlist = Table(
     Column("model", String),
     Column("env", String),
     Column("country", String),  # coarse geo from MaxMind, IP discarded after lookup
+    Column("referrer", String),  # external site that sent the visitor: host + path, no query
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -46,6 +49,27 @@ MAX_EMAIL = 254
 # for each. Anything else in the body is dropped.
 _FIELDS: dict[str, int] = {"source": 24, "vendor": 48, "model": 64, "env": 64}
 _DEFAULT_SOURCE = "flash"
+MAX_REFERRER = 200
+
+
+def clean_referrer(value: Any) -> str | None:
+    """An http(s) referrer cut to host and path, or None.
+
+    The query string and fragment are dropped (they can carry session ids or
+    tracking tokens), as are any credentials and the port. What is kept says
+    which site and which page linked here, e.g. ``news.ycombinator.com/item``.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parts = urlsplit(value.strip())
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host:
+        return None
+    path = parts.path.rstrip("/")
+    return (host + path)[:MAX_REFERRER]
 
 
 def normalise_email(value: Any) -> str | None:
@@ -70,6 +94,7 @@ def describe(body: Any) -> dict[str, str | None]:
     data = body if isinstance(body, dict) else {}
     fields = {name: _clean(data.get(name), limit) for name, limit in _FIELDS.items()}
     fields["source"] = fields["source"] or _DEFAULT_SOURCE
+    fields["referrer"] = clean_referrer(data.get("referrer"))
     return fields
 
 
@@ -86,6 +111,7 @@ def add(
             vendor=fields.get("vendor"),
             model=fields.get("model"),
             env=fields.get("env"),
+            referrer=fields.get("referrer"),
             country=country,
             created_at=now or datetime.now(UTC),
         )
