@@ -37,6 +37,8 @@ _SLEEP_BUCKETS = {"<5m", "5-15m", "15-60m", "1-6h", "6h+", "always_on"}
 _GAMUT_RE = re.compile(r"^[a-z0-9_]{1,24}$")
 _RES_RE = re.compile(r"^\d{2,5}x\d{2,5}$")
 _FEATURES = ("relay", "touch", "mcp", "quiet_hours")
+# Which admin design the install runs (the Paper redesign is opt-in on self-hosted).
+_UI = {"classic", "paper"}
 _OTA = ("offered", "applied", "failed")
 _PY_RE = re.compile(r"^3\.\d{1,2}$")
 _KIND_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
@@ -249,6 +251,7 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
             lineups=_bucket(data.get("lineups")),
             features=_features(data.get("features")),
             ota=_ota(data.get("ota")),
+            ui=_enum(data.get("ui"), _UI, "other"),
         )
     except Exception:
         # Stats collection must never break the response the app depends on.

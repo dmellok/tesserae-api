@@ -356,3 +356,19 @@ def test_post_heartbeat_age_and_ota_coerced(client, seeded_settings):
     assert row["age"] == "unknown"
     assert row["ota_offered"] == "unknown"
     assert row["ota_applied"] is None
+
+
+# ui: which admin design the install runs (Paper is opt-in on self-hosted) ------
+
+
+def test_post_heartbeat_ui_lands_and_is_coerced(client, seeded_settings):
+    client.post("/heartbeat", json={"install": UUID_A, "ui": "paper"})
+    assert _rows(seeded_settings.stats_db_path, "heartbeats")[0]["ui"] == "paper"
+    # A later ping the same day with an unknown value collapses onto the row as "other".
+    client.post("/heartbeat", json={"install": UUID_A, "ui": "<script>"})
+    assert _rows(seeded_settings.stats_db_path, "heartbeats")[0]["ui"] == "other"
+
+
+def test_post_heartbeat_ui_absent_stays_null(client, seeded_settings):
+    client.post("/heartbeat", json={"install": UUID_A, "version": "0.436.1"})
+    assert _rows(seeded_settings.stats_db_path, "heartbeats")[0]["ui"] is None
