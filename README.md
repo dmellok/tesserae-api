@@ -297,7 +297,10 @@ no per-request row, no IP, and no install id: the endpoint upserts a count and s
 country only.
 
 The Cloud waitlist is `cloud_waitlist` (`email PRIMARY KEY, source, vendor, model, env, country,
-created_at`), written by `POST /cloud/waitlist` and cleared per row by `POST /cloud/waitlist/leave`.
+referrer, created_at, invited_at`), written by `POST /cloud/waitlist` and cleared per row by
+`POST /cloud/waitlist/leave`. `invited_at` is set by hand when the invitation mail goes out:
+`docker exec tesserae-api python -m scripts.invite_waitlist list` shows who is waiting, and
+`... mark --all-pending` (or `mark a@b.c d@e.f`) records the send.
 It is the one table holding something a person typed about themselves; the address is there because
 they asked to be told about a hosted Tesserae, and it is used for that one email and nothing else.
 

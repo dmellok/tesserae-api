@@ -123,6 +123,7 @@ def summarise(url: str, now: datetime | None = None) -> None:
 def _summarise_waitlist(url: str, now: datetime) -> None:
     _print_header("Cloud waitlist")
     print(f"  total           {waitlist.count(url)}")
+    print(f"  invited         {waitlist.invited_count(url)}")
     for days in (7, 30):
         print(f"  last {days:>3} days   {waitlist.count(url, days=days, now=now)}")
     for title, column, default in (

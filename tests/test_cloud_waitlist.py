@@ -159,3 +159,49 @@ def test_referrer_column_is_added_to_an_existing_table(tmp_path):
     cols = {c["name"] for c in inspect(get_engine(url)).get_columns("cloud_waitlist")}
     assert "referrer" in cols
     assert waitlist.add(url, email="old@example.com", country=None, referrer="t.co")
+
+
+def test_invited_at_column_is_added_to_an_existing_table(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    with create_engine(url).begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE cloud_waitlist (email VARCHAR PRIMARY KEY, source VARCHAR NOT NULL,"
+                " vendor VARCHAR, model VARCHAR, env VARCHAR, country VARCHAR, referrer VARCHAR,"
+                " created_at TIMESTAMP NOT NULL)"
+            )
+        )
+    init_db(url)
+    cols = {c["name"] for c in inspect(get_engine(url)).get_columns("cloud_waitlist")}
+    assert "invited_at" in cols
+
+
+def test_marking_invited_skips_people_already_asked(client, seeded_settings):
+    url = seeded_settings.resolved_database_url
+    for email in ("one@example.com", "two@example.com", "three@example.com"):
+        client.post("/cloud/waitlist", json={"email": email})
+    assert [r["email"] for r in waitlist.rows(url, pending_only=True)] == [
+        "one@example.com",
+        "two@example.com",
+        "three@example.com",
+    ]
+
+    assert waitlist.mark_invited(url, emails=[" One@Example.com "]) == 1
+    assert waitlist.invited_count(url) == 1
+    assert [r["email"] for r in waitlist.rows(url, pending_only=True)] == [
+        "two@example.com",
+        "three@example.com",
+    ]
+    first = next(r for r in waitlist.rows(url) if r["email"] == "one@example.com")["invited_at"]
+
+    # A second round takes everyone still waiting and leaves the first date alone.
+    assert waitlist.mark_invited(url) == 2
+    assert waitlist.mark_invited(url) == 0
+    assert waitlist.invited_count(url) == 3
+    again = next(r for r in waitlist.rows(url) if r["email"] == "one@example.com")["invited_at"]
+    assert again == first
+
+    assert waitlist.mark_invited(url, emails=["two@example.com"], clear=True) == 1
+    assert [r["email"] for r in waitlist.rows(url, pending_only=True)] == ["two@example.com"]

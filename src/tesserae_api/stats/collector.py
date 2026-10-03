@@ -172,7 +172,7 @@ firmware_check_stats = Table(
 # Columns added after a table first shipped, applied in place to pre-existing tables.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "hits": {"kind": "VARCHAR"},
-    "cloud_waitlist": {"referrer": "VARCHAR"},
+    "cloud_waitlist": {"referrer": "VARCHAR", "invited_at": "TIMESTAMP WITH TIME ZONE"},
     "heartbeat_kinds": {
         "fw_version": "VARCHAR",
         "gamut": "VARCHAR",

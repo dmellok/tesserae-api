@@ -8,7 +8,8 @@ deploy:
                    is a no-op. Alongside the address: where the form was (the
                    web flasher or the homepage), the panel picked at the time if
                    any, the site that referred the visitor (host and path only),
-                   a coarse country, and the day it was added.
+                   a coarse country, the day it was added, and the day the
+                   person was invited to try the hosted service, if they have been.
 
 The address is the only personal data the API stores anywhere, it is stored
 because the person typed it in for exactly this purpose, and it leaves again
@@ -22,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import Column, DateTime, String, Table, delete, func, select
+from sqlalchemy import Column, DateTime, String, Table, delete, func, select, update
 
 from tesserae_api.stats.collector import _upsert_insert, get_engine, metadata
 
@@ -37,6 +38,7 @@ cloud_waitlist = Table(
     Column("country", String),  # coarse geo from MaxMind, IP discarded after lookup
     Column("referrer", String),  # external site that sent the visitor: host + path, no query
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("invited_at", DateTime(timezone=True)),  # when the invitation mail went out
 )
 
 # Deliberately loose: one @, something either side, a dot in the domain. The
@@ -149,3 +151,45 @@ def distribution(url: str, column: str, default: str = "(unknown)") -> dict[str,
     stmt = select(key, cnt).group_by(key).order_by(cnt.desc())
     with engine.connect() as conn:
         return {row[0]: row[1] for row in conn.execute(stmt)}
+
+
+def rows(url: str, *, pending_only: bool = False) -> list[dict[str, Any]]:
+    """Every sign-up, oldest first; or only those not yet invited."""
+    engine = get_engine(url)
+    stmt = select(cloud_waitlist).order_by(cloud_waitlist.c.created_at)
+    if pending_only:
+        stmt = stmt.where(cloud_waitlist.c.invited_at.is_(None))
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(stmt)]
+
+
+def mark_invited(
+    url: str, *, emails: list[str] | None = None, now: datetime | None = None, clear: bool = False
+) -> int:
+    """Record that the invitation went out (or didn't, with ``clear``).
+
+    With ``emails`` only those rows are touched; without, every row still waiting.
+    Returns how many rows changed. Already-invited rows are left as they are so a
+    second run never moves the date.
+    """
+    engine = get_engine(url)
+    stmt = update(cloud_waitlist).values(invited_at=None if clear else (now or datetime.now(UTC)))
+    if emails is not None:
+        stmt = stmt.where(cloud_waitlist.c.email.in_([normalise_email(e) or e for e in emails]))
+    if clear:
+        stmt = stmt.where(cloud_waitlist.c.invited_at.is_not(None))
+    else:
+        stmt = stmt.where(cloud_waitlist.c.invited_at.is_(None))
+    with engine.begin() as conn:
+        return conn.execute(stmt).rowcount
+
+
+def invited_count(url: str) -> int:
+    engine = get_engine(url)
+    stmt = (
+        select(func.count())
+        .select_from(cloud_waitlist)
+        .where(cloud_waitlist.c.invited_at.is_not(None))
+    )
+    with engine.connect() as conn:
+        return conn.execute(stmt).scalar_one()
