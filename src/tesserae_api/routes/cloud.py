@@ -1,8 +1,8 @@
-"""POST /cloud/waitlist - ask to hear about a hosted Tesserae (browser-to-server).
+"""POST /cloud/waitlist - ask to hear about Tesserae Cloud (browser-to-server).
 
-The web flasher at tesserae.ink/flash carries a sign-up block for Tesserae
-Cloud, a hosted option that only gets built if enough people want it. This is
-how that gets counted. The body's email is stored (lowercased, once); the
+The tesserae.ink homepage carries a sign-up block for Tesserae Cloud, the
+separate hosted Tesserae at cloud.tesserae.ink that opens to the waitlist in
+rounds. This is how that gets counted. The body's email is stored (lowercased, once); the
 panel picked on the flasher at the time, the site that referred the visitor
 (host and path, sent by the page) and a coarse country ride along so the
 demand can be read by device, region and channel. Nothing else about the

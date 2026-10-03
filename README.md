@@ -242,8 +242,9 @@ rate-limits the route to 12 reports per hour per IP.
 
 ### `POST /cloud/waitlist`
 
-The Tesserae Cloud waitlist on tesserae.ink/flash. Tesserae Cloud is a hosted option that only gets
-built if enough people ask for it, and this is where the asking is counted. JSON body:
+The Tesserae Cloud waitlist on the tesserae.ink homepage. Tesserae Cloud is a separate hosted
+Tesserae at cloud.tesserae.ink, opening to the waitlist in rounds; this is where sign-ups are
+counted. JSON body:
 
 ```json
 {
@@ -302,7 +303,7 @@ referrer, created_at, invited_at`), written by `POST /cloud/waitlist` and cleare
 `docker exec tesserae-api python -m scripts.invite_waitlist list` shows who is waiting, and
 `... mark --all-pending` (or `mark a@b.c d@e.f`) records the send.
 It is the one table holding something a person typed about themselves; the address is there because
-they asked to be told about a hosted Tesserae, and it is used for that one email and nothing else.
+they asked to be told about Tesserae Cloud, and it is used for that one email and nothing else.
 
 What is deliberately **not** collected, ever:
 
