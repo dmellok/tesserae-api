@@ -97,6 +97,12 @@ def _ha(value: Any) -> bool | None:
     return None if value is None else bool(value)
 
 
+def _flag(value: Any) -> bool | None:
+    """A nullable boolean: absent stays None so an older app that never sent
+    the field is told apart from one that sent false."""
+    return None if value is None else bool(value)
+
+
 def _age(value: Any) -> str | None:
     text = _str(value)
     if text is None:
@@ -252,6 +258,7 @@ def heartbeat(request: Request, body: dict[str, Any] | None = Body(default=None)
             features=_features(data.get("features")),
             ota=_ota(data.get("ota")),
             ui=_enum(data.get("ui"), _UI, "other"),
+            ui_chosen=_flag(data.get("ui_chosen")),
         )
     except Exception:
         # Stats collection must never break the response the app depends on.

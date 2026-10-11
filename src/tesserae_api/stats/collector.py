@@ -102,6 +102,7 @@ _HEARTBEAT_FIELDS = (
     "ota_applied",
     "ota_failed",
     "ui",
+    "ui_chosen",
 )
 
 # Per-kind descriptive columns beyond the kind itself; all upserted to the
@@ -135,6 +136,7 @@ heartbeats = Table(
     Column("ota_applied", String),  # bucketed devices already on it
     Column("ota_failed", String),  # bucketed devices whose last OTA report failed
     Column("ui", String),  # admin design in use: classic / paper / other
+    Column("ui_chosen", Boolean),  # the design was set by hand, not the default (app 0.448.10)
     UniqueConstraint("day", "install_uuid", name="uq_heartbeats_day_install"),
     Index("idx_heartbeats_install", "install_uuid"),
     Index("idx_heartbeats_day", "day"),
@@ -191,6 +193,7 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "ota_applied": "VARCHAR",
         "ota_failed": "VARCHAR",
         "ui": "VARCHAR",
+        "ui_chosen": "BOOLEAN",
     },
 }
 
@@ -327,6 +330,7 @@ def record_heartbeat(
     features: dict[str, bool | None] | None = None,
     ota: dict[str, str | None] | None = None,
     ui: str | None = None,
+    ui_chosen: bool | None = None,
     day: date | None = None,
 ) -> None:
     """Upsert one heartbeat for (day, install). Repeated pings the same day collapse
@@ -366,6 +370,7 @@ def record_heartbeat(
         "ota_applied": ota.get("applied"),
         "ota_failed": ota.get("failed"),
         "ui": ui,
+        "ui_chosen": ui_chosen,
     }
     with engine.begin() as conn:
         stmt = ins(heartbeats).values(day=day, install_uuid=install_uuid, **descriptive)

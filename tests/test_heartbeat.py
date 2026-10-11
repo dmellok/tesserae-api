@@ -372,3 +372,15 @@ def test_post_heartbeat_ui_lands_and_is_coerced(client, seeded_settings):
 def test_post_heartbeat_ui_absent_stays_null(client, seeded_settings):
     client.post("/heartbeat", json={"install": UUID_A, "version": "0.436.1"})
     assert _rows(seeded_settings.stats_db_path, "heartbeats")[0]["ui"] is None
+
+
+def test_post_heartbeat_ui_chosen_is_a_nullable_flag(client, seeded_settings):
+    # App 0.448.10 says whether the design was set by hand; older apps never send it.
+    client.post("/heartbeat", json={"install": UUID_A, "ui": "paper", "ui_chosen": True})
+    row = _rows(seeded_settings.stats_db_path, "heartbeats")[0]
+    assert row["ui"] == "paper" and bool(row["ui_chosen"]) is True
+    client.post("/heartbeat", json={"install": UUID_A, "ui": "classic", "ui_chosen": False})
+    row = _rows(seeded_settings.stats_db_path, "heartbeats")[0]
+    assert row["ui"] == "classic" and bool(row["ui_chosen"]) is False
+    client.post("/heartbeat", json={"install": UUID_B, "ui": "classic"})
+    assert _rows(seeded_settings.stats_db_path, "heartbeats")[1]["ui_chosen"] is None
