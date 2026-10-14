@@ -19,6 +19,7 @@ def client(monkeypatch):
     get_settings.cache_clear()
     inat.reset_cache()
     monkeypatch.setattr(inat, "MIN_INTERVAL_S", 0.0)
+    assert inat.MAX_IN_FLIGHT >= 2
     with TestClient(create_app()) as c:
         yield c
     get_settings.cache_clear()

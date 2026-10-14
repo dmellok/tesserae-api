@@ -37,11 +37,16 @@ ALLOWED = re.compile(r"^(observations|observations/species_counts|taxa|taxa/\d+)
 QUERY_MAX_CHARS = 2000
 RESPONSE_MAX_BYTES = 5_000_000
 CACHE_MAX_ENTRIES = 500
-# iNaturalist asks for no more than one request a second from a client.
-MIN_INTERVAL_S = 1.0
+# iNaturalist asks for about one request a second from a client, averaged: a
+# few calls may be in flight at once, each started a short gap after the last,
+# so a render's two questions are not queued behind the art library's lookups
+# for longer than the cloud waits on a source (eight seconds).
+MIN_INTERVAL_S = 0.35
+MAX_IN_FLIGHT = 3
 
 _cache: OrderedDict[str, tuple[float, int, bytes, str]] = OrderedDict()
-_gate = asyncio.Lock()
+_slots = asyncio.Semaphore(MAX_IN_FLIGHT)
+_pace = asyncio.Lock()
 _last_call = 0.0
 
 
@@ -111,11 +116,13 @@ async def inat_proxy(
         )
 
     global _last_call
-    async with _gate:
-        # one caller at a time, at least a second after the last call went out
-        wait = MIN_INTERVAL_S - (time.monotonic() - _last_call)
-        if wait > 0:
-            await asyncio.sleep(wait)
+    async with _slots:
+        # a few in flight at once, each started a short gap after the last
+        async with _pace:
+            wait = MIN_INTERVAL_S - (time.monotonic() - _last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            _last_call = time.monotonic()
         hit = _cached(url, time.monotonic())  # another caller may have filled it while we waited
         if hit:
             status, body, ctype = hit
@@ -125,13 +132,11 @@ async def inat_proxy(
         try:
             resp = await _upstream_get(url, settings.inat_timeout_seconds)
         except httpx.HTTPError as exc:
-            _last_call = time.monotonic()
             return JSONResponse(
                 {"detail": f"iNaturalist unreachable: {type(exc).__name__}"},
                 status_code=502,
                 headers={"Cache-Control": "no-store"},
             )
-        _last_call = time.monotonic()
     body = resp.content
     ctype = (
         resp.headers.get("content-type", "application/json").split(";")[0].strip()
