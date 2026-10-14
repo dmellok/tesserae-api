@@ -65,6 +65,18 @@ class Settings(BaseSettings):
     # (default) accepts the reports and forwards nothing.
     flash_webhook_url: str = ""
 
+    # -- iNaturalist proxy ---------------------------------------------
+    # Tesserae Cloud's Workers share their outbound addresses with every other
+    # Worker and iNaturalist rate-limits by address, so the cloud reads
+    # iNaturalist through GET /inat/v1/... here, with this key in
+    # X-Tesserae-Proxy-Key. Empty (default) disables the route.
+    inat_proxy_key: str = ""
+    inat_upstream: str = "https://api.inaturalist.org/v1"
+    inat_timeout_seconds: float = 20.0
+    # How long an answer is kept, so many panels asking the same question cost
+    # iNaturalist one call; the cloud's own cache is of the same order.
+    inat_cache_seconds: int = 900
+
     # -- template marketplace ------------------------------------------
     # Discord review channel: submissions post as embeds with Approve/Reject
     # buttons via the bot token (plain webhooks can't carry components), and

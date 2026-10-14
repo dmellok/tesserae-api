@@ -60,6 +60,8 @@ services:
       # Live flash notifications: webhook that receives every completed web
       # flash as JSON (set in .env; empty = reports are accepted and dropped).
       TESSERAE_FLASH_WEBHOOK_URL: ${TESSERAE_FLASH_WEBHOOK_URL:-}
+      # iNaturalist proxy for Tesserae Cloud (set in .env; empty = route off).
+      TESSERAE_INAT_PROXY_KEY: ${TESSERAE_INAT_PROXY_KEY:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 30s

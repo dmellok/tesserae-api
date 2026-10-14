@@ -14,7 +14,7 @@ from tesserae_api.routes import cloud as cloud_routes
 from tesserae_api.routes import discord as discord_routes
 from tesserae_api.routes import firmware as firmware_routes
 from tesserae_api.routes import flash as flash_routes
-from tesserae_api.routes import heartbeat, templates, version, widgets
+from tesserae_api.routes import heartbeat, inat, templates, version, widgets
 from tesserae_api.stats import collector, geo
 
 log = logging.getLogger("tesserae_api")
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(heartbeat.router)
     app.include_router(templates.router)
     app.include_router(discord_routes.router)
+    app.include_router(inat.router)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:
