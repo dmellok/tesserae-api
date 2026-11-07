@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     # descriptor-<kind>.json assets, one per OTA-capable device kind.
     firmware_repo: str = "dmellok/tesserae-device-firmware"
 
+    # More repos whose releases carry descriptor-<kind>.json assets, polled
+    # like firmware_repo: first-party clients released from their own repo
+    # (the Raspberry Pi client signs a wheel per Pi kind). A failed poll keeps
+    # that repo's entries from the previous cache, as a community repo does.
+    # Comma-separated ``owner/repo``.
+    descriptor_firmware_repos: str = "dmellok/tesserae-device-pi"
+
     # Community firmware feeds: device kinds whose firmware lives in a repo
     # that publishes plain releases without a descriptor-<kind>.json asset.
     # Every published (non-draft, non-prerelease) release of such a repo counts
@@ -129,6 +136,12 @@ class Settings(BaseSettings):
     @property
     def repo_slug(self) -> str:
         return f"{self.repo_owner}/{self.repo_name}"
+
+    @property
+    def descriptor_firmware_sources(self) -> tuple[str, ...]:
+        """``descriptor_firmware_repos`` as a tuple, the main firmware repo left out."""
+        repos = (r.strip() for r in self.descriptor_firmware_repos.split(","))
+        return tuple(dict.fromkeys(r for r in repos if r and r != self.firmware_repo))
 
     @property
     def community_firmware_sources(self) -> dict[str, str]:

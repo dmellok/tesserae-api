@@ -6,6 +6,8 @@ Two kinds of source feed the cache:
   non-prerelease) release "covers" a kind iff it carries a
   descriptor-<kind>.json asset; the response points at that descriptor so a
   Tesserae server can import it for OTA.
+* Further descriptor repos (settings.descriptor_firmware_repos), read the
+  same way: first-party clients released from their own repo.
 * Community firmware repos (settings.community_firmware_repos), one repo per
   kind, whose releases carry plain firmware files and no descriptor. Every
   published release of the repo covers its kind. The response lists the
@@ -97,10 +99,12 @@ def _release_entry(release: dict[str, Any], repo: str, kinds: dict[str, Any]) ->
     }
 
 
-def _descriptor_releases(client: httpx.Client, settings: Settings) -> list[dict[str, Any]]:
-    """The firmware repo's releases, each indexing its descriptor assets by kind."""
+def _descriptor_releases(
+    client: httpx.Client, settings: Settings, repo: str
+) -> list[dict[str, Any]]:
+    """A descriptor repo's releases, each indexing its descriptor assets by kind."""
     releases: list[dict[str, Any]] = []
-    for release in _fetch_releases(client, settings, settings.firmware_repo):
+    for release in _fetch_releases(client, settings, repo):
         kinds: dict[str, dict[str, Any]] = {}
         for asset in release.get("assets") or []:
             kind = _descriptor_kind(asset.get("name", "") or "")
@@ -108,7 +112,7 @@ def _descriptor_releases(client: httpx.Client, settings: Settings) -> list[dict[
                 kinds[kind] = _asset_summary(asset)
         if not kinds:
             continue  # release covers no OTA kind
-        releases.append(_release_entry(release, settings.firmware_repo, kinds))
+        releases.append(_release_entry(release, repo, kinds))
     return releases
 
 
@@ -130,11 +134,19 @@ def build_cache(
     """Fetch releases from every source and index each kind's coverage, newest first.
 
     A failure on the main firmware repo raises (the caller keeps the old cache).
-    A failure on a community repo is logged and that repo's entries are carried
+    A failure on any other repo is logged and that repo's entries are carried
     over from ``previous`` (or dropped when there is nothing to carry), so one
-    unreachable or deleted community repo never stalls the main feed.
+    unreachable or deleted repo never stalls the main feed.
     """
-    releases = _descriptor_releases(client, settings)
+    releases = _descriptor_releases(client, settings, settings.firmware_repo)
+    for repo in settings.descriptor_firmware_sources:
+        try:
+            releases.extend(_descriptor_releases(client, settings, repo))
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("descriptor firmware poll failed for %s: %s", repo, exc)
+            releases.extend(
+                r for r in (previous or {}).get("releases", []) if r.get("repo") == repo
+            )
     for kind, repo in settings.community_firmware_sources.items():
         try:
             releases.extend(_community_releases(client, settings, kind, repo))

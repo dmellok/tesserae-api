@@ -105,11 +105,45 @@ COMMUNITY_RAW = [
 ]
 
 
-def _mock_client(community_status: int = 200) -> httpx.Client:
+def _desc(kind: str, tag: str) -> dict:
+    return {
+        "name": f"descriptor-{kind}.json",
+        "browser_download_url": (
+            f"https://github.com/dmellok/tesserae-device-pi/releases/download/{tag}/"
+            f"descriptor-{kind}.json"
+        ),
+        "size": 600,
+        "content_type": "application/json",
+    }
+
+
+# The Pi client's own repo: a wheel plus one descriptor per Pi kind.
+PI_RAW = [
+    {
+        "tag_name": "v0.9.0",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-11-09T10:00:00Z",
+        "html_url": "https://github.com/dmellok/tesserae-device-pi/releases/tag/v0.9.0",
+        "body": "One Pi client",
+        "assets": [
+            _bin("tesserae_device_pi-0.9.0-py3-none-any.whl"),
+            _desc("pi_client", "v0.9.0"),
+            _desc("pi_png_client", "v0.9.0"),
+        ],
+    },
+]
+
+
+def _mock_client(community_status: int = 200, pi_status: int | None = None) -> httpx.Client:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/repos/dmellok/tesserae-device-firmware/releases"):
             return httpx.Response(200, json=RELEASES_RAW)
+        if path.endswith("/repos/dmellok/tesserae-device-pi/releases") and pi_status is not None:
+            if pi_status != 200:
+                return httpx.Response(pi_status, text="nope")
+            return httpx.Response(200, json=PI_RAW)
         if path.endswith("/repos/varanu5/picpak-tesserae-client/releases"):
             if community_status != 200:
                 return httpx.Response(community_status, text="nope")
@@ -189,6 +223,43 @@ def test_build_cache_no_community_sources(settings):
 def test_community_sources_parse_ignores_malformed_pairs(settings):
     settings.community_firmware_repos = " a=o/r , bad, =o/r, b= , c=x/y "
     assert settings.community_firmware_sources == {"a": "o/r", "c": "x/y"}
+
+
+def _pi_releases(cache: dict) -> list[dict]:
+    return [r for r in cache["releases"] if r["repo"] == "dmellok/tesserae-device-pi"]
+
+
+def test_descriptor_repos_default_to_the_pi_client(settings):
+    assert settings.descriptor_firmware_sources == ("dmellok/tesserae-device-pi",)
+    settings.descriptor_firmware_repos = " a/b , dmellok/tesserae-device-firmware, , a/b, c/d "
+    # The main repo is never polled twice; duplicates and blanks are dropped.
+    assert settings.descriptor_firmware_sources == ("a/b", "c/d")
+
+
+def test_build_cache_descriptor_repo_covers_its_kinds(settings):
+    with _mock_client(pi_status=200) as client:
+        cache = fw.build_cache(client, settings)
+    [pi] = _pi_releases(cache)
+    assert set(pi["kinds"]) == {"pi_client", "pi_png_client"}  # descriptors only, not the wheel
+    body = fw.resolve(cache, "pi_client")
+    assert body is not None
+    latest = body["latest"]
+    assert latest["version"] == "0.9.0"
+    assert latest["descriptor_url"].endswith("/v0.9.0/descriptor-pi_client.json")
+    assert [a["name"] for a in latest["assets"]] == ["descriptor-pi_client.json"]
+    # The main feed is untouched.
+    assert [r["version"] for r in _descriptor_releases(cache)] == ["1.6.0", "1.5.0"]
+
+
+def test_build_cache_descriptor_repo_failure_carries_previous_entries(settings):
+    with _mock_client(pi_status=200) as client:
+        good = fw.build_cache(client, settings)
+    with _mock_client(pi_status=502) as client:
+        cache = fw.build_cache(client, settings, previous=good)
+    assert [r["version"] for r in _pi_releases(cache)] == ["0.9.0"]
+    assert [r["version"] for r in _descriptor_releases(cache)] == ["1.6.0", "1.5.0"]
+    with _mock_client(pi_status=404) as client:
+        assert _pi_releases(fw.build_cache(client, settings)) == []
 
 
 def test_build_cache_http_error(settings):
