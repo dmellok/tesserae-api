@@ -118,6 +118,12 @@ if the newest release does not cover the kind, older releases are walked until o
 therefore discovered from the release assets, not a config file. Releases are polled and cached to
 disk (authenticated with a GitHub token).
 
+First-party clients released from their own repo are read the same way:
+`TESSERAE_DESCRIPTOR_FIRMWARE_REPOS` lists further `owner/repo`s whose releases carry
+`descriptor-<kind>.json` assets (default `dmellok/tesserae-device-pi`, the Raspberry Pi client,
+which signs one wheel per Pi kind). One that fails to fetch keeps its entries from the previous
+cache.
+
 Community firmware kept in its author's repo is covered too: `TESSERAE_COMMUNITY_FIRMWARE_REPOS`
 lists `kind=owner/repo` pairs (default `picpak_client=varanu5/picpak-tesserae-client`). Every
 published release of such a repo covers its kind. The response then lists the release's files as
