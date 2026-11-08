@@ -229,8 +229,11 @@ def _pi_releases(cache: dict) -> list[dict]:
     return [r for r in cache["releases"] if r["repo"] == "dmellok/tesserae-device-pi"]
 
 
-def test_descriptor_repos_default_to_the_pi_client(settings):
-    assert settings.descriptor_firmware_sources == ("dmellok/tesserae-device-pi",)
+def test_descriptor_repos_default_to_the_pi_client_and_the_inky_frame(settings):
+    assert settings.descriptor_firmware_sources == (
+        "dmellok/tesserae-device-pi",
+        "dmellok/tesserae-device-inkyframe",
+    )
     settings.descriptor_firmware_repos = " a/b , dmellok/tesserae-device-firmware, , a/b, c/d "
     # The main repo is never polled twice; duplicates and blanks are dropped.
     assert settings.descriptor_firmware_sources == ("a/b", "c/d")

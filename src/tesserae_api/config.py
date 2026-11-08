@@ -38,10 +38,11 @@ class Settings(BaseSettings):
 
     # More repos whose releases carry descriptor-<kind>.json assets, polled
     # like firmware_repo: first-party clients released from their own repo
-    # (the Raspberry Pi client signs a wheel per Pi kind). A failed poll keeps
+    # (the Raspberry Pi client signs a wheel per Pi kind; the Inky Frame
+    # firmware signs its Pico 2 W image for pimoroni_inky_frame_73). A failed poll keeps
     # that repo's entries from the previous cache, as a community repo does.
     # Comma-separated ``owner/repo``.
-    descriptor_firmware_repos: str = "dmellok/tesserae-device-pi"
+    descriptor_firmware_repos: str = "dmellok/tesserae-device-pi,dmellok/tesserae-device-inkyframe"
 
     # Community firmware feeds: device kinds whose firmware lives in a repo
     # that publishes plain releases without a descriptor-<kind>.json asset.
